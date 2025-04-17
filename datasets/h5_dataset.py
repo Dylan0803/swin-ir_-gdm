@@ -96,19 +96,3 @@ if __name__ == '__main__':
     h5_path = '/your/path/to/dataset.h5'
 
     train_ds, valid_ds = generate_train_valid_dataset(h5_path)
-
-    # 可视化第一个样本
-    lr, hr = train_ds[0]
-    print("LR shape:", lr.shape)
-    print("HR shape:", hr.shape)
-
-    # 可视化
-    plt.subplot(1, 2, 1)
-    plt.imshow(lr.squeeze().numpy(), cmap='viridis')
-    plt.title('Low Resolution')
-
-    plt.subplot(1, 2, 2)
-    plt.imshow(hr.squeeze().numpy(), cmap='viridis')
-    plt.title('High Resolution')
-
-    plt.show()
