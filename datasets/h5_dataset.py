@@ -5,35 +5,35 @@ import numpy as np
 import random
 import os
 
-# ×Ô¶¨ÒåÊı¾İ¼¯Àà£¬¼Ì³Ğ×Ô PyTorch µÄ Dataset
+# è‡ªå®šä¹‰æ•°æ®é›†ç±»ï¼Œç»§æ‰¿è‡ª PyTorch çš„ Dataset
 
 
 class ConcDatasetTorch(Dataset):
     def __init__(self, dataset_file_name, index_list=None, shuffle=True):
         """
-        ²ÎÊı£º
-        dataset_file_name£º.h5 ÎÄ¼şÂ·¾¶
-        index_list£ºÓÃÓÚÖ¸¶¨Ê¹ÓÃÄÄĞ©Ë÷Òı£¬Ä¬ÈÏÊ¹ÓÃÈ«²¿
-        shuffle£ºÊÇ·ñÔÚ index_list ÄÚ²¿½øĞĞ´òÂÒ
+        å‚æ•°ï¼š
+        dataset_file_nameï¼š.h5 æ–‡ä»¶è·¯å¾„
+        index_listï¼šç”¨äºæŒ‡å®šä½¿ç”¨å“ªäº›ç´¢å¼•ï¼Œé»˜è®¤ä½¿ç”¨å…¨éƒ¨
+        shuffleï¼šæ˜¯å¦åœ¨ index_list å†…éƒ¨è¿›è¡Œæ‰“ä¹±
         """
         super(ConcDatasetTorch, self).__init__()
         self.dataset_file = h5py.File(dataset_file_name, 'r')
 
-        # ¼ÓÔØ 'HR' ºÍ 'LR' Êı¾İ×é
+        # åŠ è½½ 'HR' å’Œ 'LR' æ•°æ®ç»„
         self.hr_data = self.dataset_file['HR']
         self.lr_data = self.dataset_file['LR']
 
-        # È·±£ HR ºÍ LR ÊıÁ¿Ò»ÖÂ
+        # ç¡®ä¿ HR å’Œ LR æ•°é‡ä¸€è‡´
         assert len(self.lr_data) == len(self.hr_data), \
             f'Mismatch in HR and LR dataset lengths: {len(self.lr_data)} vs {len(self.hr_data)}'
 
         self.dataset_length = len(self.lr_data)
 
-        # Èç¹ûÎ´Ö¸¶¨Ë÷ÒıÁĞ±í£¬¾ÍÊ¹ÓÃÈ«²¿Êı¾İ
+        # å¦‚æœæœªæŒ‡å®šç´¢å¼•åˆ—è¡¨ï¼Œå°±ä½¿ç”¨å…¨éƒ¨æ•°æ®
         if index_list is None:
             index_list = list(range(self.dataset_length))
 
-        # ÊÇ·ñ´òÂÒË÷Òı
+        # æ˜¯å¦æ‰“ä¹±ç´¢å¼•
         if shuffle:
             random.shuffle(index_list)
 
@@ -44,33 +44,33 @@ class ConcDatasetTorch(Dataset):
 
     def __getitem__(self, idx):
         """
-        ·µ»ØÊı¾İÊ±£¬×Ô¶¯¶ÁÈ¡ HR ºÍ LR ²¢¼ÓÉÏ channel Î¬¶È£º [H, W] ¡ú [1, H, W]
+        è¿”å›æ•°æ®æ—¶ï¼Œè‡ªåŠ¨è¯»å– HR å’Œ LR å¹¶åŠ ä¸Š channel ç»´åº¦ï¼š [H, W] â†’ [1, H, W]
         """
         idx_in_file = self.index_list[idx]
         lr = self.lr_data[idx_in_file]
         hr = self.hr_data[idx_in_file]
 
-        # Ôö¼ÓÍ¨µÀÎ¬¶È
+        # å¢åŠ é€šé“ç»´åº¦
         if len(lr.shape) == 2:
             lr = lr[np.newaxis, :, :]
         if len(hr.shape) == 2:
             hr = hr[np.newaxis, :, :]
 
-        # ×ª»»Îª tensor
+        # è½¬æ¢ä¸º tensor
         lr_tensor = torch.tensor(lr, dtype=torch.float32)
         hr_tensor = torch.tensor(hr, dtype=torch.float32)
 
         return lr_tensor, hr_tensor
 
-# »®·ÖÑµÁ·¼¯ºÍÑéÖ¤¼¯£¨8:2£©
+# åˆ’åˆ†è®­ç»ƒé›†å’ŒéªŒè¯é›†ï¼ˆ8:2ï¼‰
 
 
 def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
     """
-    data_file: .h5 Êı¾İÎÄ¼şÂ·¾¶
-    train_ratio: ÑµÁ·¼¯±ÈÀı£¬Ä¬ÈÏ 0.8
-    shuffle: ÊÇ·ñ´òÂÒÊı¾İ
-    ·µ»Ø£ºÑµÁ·¼¯¶ÔÏó£¬ÑéÖ¤¼¯¶ÔÏó
+    data_file: .h5 æ•°æ®æ–‡ä»¶è·¯å¾„
+    train_ratio: è®­ç»ƒé›†æ¯”ä¾‹ï¼Œé»˜è®¤ 0.8
+    shuffle: æ˜¯å¦æ‰“ä¹±æ•°æ®
+    è¿”å›ï¼šè®­ç»ƒé›†å¯¹è±¡ï¼ŒéªŒè¯é›†å¯¹è±¡
     """
     with h5py.File(data_file, 'r') as f:
         total_len = len(f['HR'])
@@ -83,7 +83,7 @@ def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
         train_list = index_list[:split_idx]
         valid_list = index_list[split_idx:]
 
-    # ´´½¨Êı¾İ¼¯ÊµÀı
+    # åˆ›å»ºæ•°æ®é›†å®ä¾‹
     train_dataset = ConcDatasetTorch(data_file, train_list, shuffle=False)
     valid_dataset = ConcDatasetTorch(data_file, valid_list, shuffle=False)
     return train_dataset, valid_dataset
@@ -92,17 +92,17 @@ def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
-    # Ê¹ÓÃ×Ô¼ºµÄ h5 Â·¾¶
+    # ä½¿ç”¨è‡ªå·±çš„ h5 è·¯å¾„
     h5_path = '/your/path/to/dataset.h5'
 
     train_ds, valid_ds = generate_train_valid_dataset(h5_path)
 
-    # ¿ÉÊÓ»¯µÚÒ»¸öÑù±¾
+    # å¯è§†åŒ–ç¬¬ä¸€ä¸ªæ ·æœ¬
     lr, hr = train_ds[0]
     print("LR shape:", lr.shape)
     print("HR shape:", hr.shape)
 
-    # ¿ÉÊÓ»¯
+    # å¯è§†åŒ–
     plt.subplot(1, 2, 1)
     plt.imshow(lr.squeeze().numpy(), cmap='viridis')
     plt.title('Low Resolution')
