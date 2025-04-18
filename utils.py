@@ -18,8 +18,8 @@ def plot_loss_curve(losses, save_path=None):
 
 
 def save_args(args, save_dir):
-    save_path = os.path.join(save_dir, 'args.txt')
-    with open(save_path, 'w') as f:
+    os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, 'args.txt'), 'w') as f:
         for k, v in vars(args).items():
             f.write(f'{k}: {v}\n')
 
