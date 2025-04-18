@@ -20,8 +20,14 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, tota
     tbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{total_epochs}")  # 显示进度条
 
     for lr, hr in tbar:
-        lr, hr = lr.to(device), hr.to(device)  # 将数据移到 GPU/CPU
+        # 确保数据维度正确
+        if len(lr.shape) == 3:
+            lr = lr.unsqueeze(0)  # 添加batch维度
+        if len(hr.shape) == 3:
+            hr = hr.unsqueeze(0)  # 添加batch维度
 
+        lr, hr = lr.to(device), hr.to(device)  # 将数据移到 GPU/CPU
+        
         optimizer.zero_grad()  # 清空梯度
         sr = model(lr)         # 前向传播得到预测图像
         loss = criterion(sr, hr)  # 计算 MSE 损失
@@ -42,6 +48,12 @@ def valid_one_epoch(model, dataloader, criterion, device):
     epoch_loss = 0.0
 
     for lr, hr in dataloader:
+        # 确保数据维度正确
+        if len(lr.shape) == 3:
+            lr = lr.unsqueeze(0)  # 添加batch维度
+        if len(hr.shape) == 3:
+            hr = hr.unsqueeze(0)  # 添加batch维度
+
         lr, hr = lr.to(device), hr.to(device)
         sr = model(lr)
         loss = criterion(sr, hr)
@@ -53,9 +65,11 @@ def valid_one_epoch(model, dataloader, criterion, device):
 # 主训练流程
 def train(args):
     logging.basicConfig(level=logging.INFO)
+    print(f"Starting training with arguments: {args}")
 
     # 设置设备为 GPU（如可用），否则为 CPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
 
     # 使用 generate_train_valid_dataset 函数来划分训练集和验证集
     train_set, valid_set = generate_train_valid_dataset(
@@ -67,8 +81,26 @@ def train(args):
     valid_loader = DataLoader(
         valid_set, batch_size=args.batch_size, shuffle=False)
 
+    # 打印数据集信息
+    sample_lr, sample_hr = next(iter(train_loader))
+    print(f"Data shapes - LR: {sample_lr.shape}, HR: {sample_hr.shape}")
+
     # 初始化 SwinIR 模型
-    model = SwinIR(upscale=args.scale, img_size=args.patch_size).to(device)
+    model = SwinIR(
+        upscale=args.scale,
+        in_chans=1,  # 设置为1通道
+        img_size=16,  # LR图像尺寸
+        window_size=8,
+        img_range=1.,
+        depths=[6, 6, 6, 6, 6, 6],
+        embed_dim=180,
+        num_heads=[6, 6, 6, 6, 6, 6],
+        mlp_ratio=2,
+        upsampler='pixelshuffledirect',  # 使用直接像素重排上采样
+        resi_connection='1conv'
+    ).to(device)
+
+    print(f"Model created with upscale factor: {args.scale}")
 
     # 定义损失函数和优化器
     criterion = nn.MSELoss()
@@ -121,7 +153,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
 
-    # 定义命令行参数（可用于运行脚本时自定义参数）
+    # 定义命令行参数
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, required=True, help='模型名称')
     parser.add_argument('--exp_name', type=str,
@@ -130,8 +162,8 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=0.0002)
-    parser.add_argument('--scale', type=int, default=4, help='放大倍数')
-    parser.add_argument('--patch_size', type=int, default=64)
+    parser.add_argument('--scale', type=int, default=6, help='放大倍数')
+    parser.add_argument('--patch_size', type=int, default=16, help='LR图像的patch大小')
     args = parser.parse_args()
 
     args.output_dir = os.path.join(
