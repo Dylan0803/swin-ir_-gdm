@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 # 使用自定义数据集类
 from datasets.h5_dataset import ConcDatasetTorch, generate_train_valid_dataset
-from models.swinir import SwinIR
+from models.network_swinir import SwinIR
 from utils import plot_loss_curve, save_args
 
 
