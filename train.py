@@ -1,50 +1,44 @@
 import os
 import time
 import logging
-import numpy as np
-from tqdm import tqdm
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
-# 导入自定义的数据集类
-from datasets.h5_dataset import H5Dataset
-
-# 导入 SwinIR 超分辨率模型
+# 使用自定义数据集类
+from datasets.h5_dataset import ConcDatasetTorch, generate_train_valid_dataset
 from models.swinir import SwinIR
-
-# 工具函数：画图、保存参数
 from utils import plot_loss_curve, save_args
 
 
-# 单个 epoch 的训练流程
+# 单轮训练过程
 def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, total_epochs):
-    model.train()
+    model.train()  # 切换为训练模式
     epoch_loss = 0.0
-    tbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{total_epochs}")
+    tbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{total_epochs}")  # 显示进度条
 
     for lr, hr in tbar:
-        lr, hr = lr.to(device), hr.to(device)
+        lr, hr = lr.to(device), hr.to(device)  # 将数据移到 GPU/CPU
 
-        optimizer.zero_grad()
-        sr = model(lr)
-        loss = criterion(sr, hr)
-        loss.backward()
-        optimizer.step()
+        optimizer.zero_grad()  # 清空梯度
+        sr = model(lr)         # 前向传播得到预测图像
+        loss = criterion(sr, hr)  # 计算 MSE 损失
+        loss.backward()        # 反向传播
+        optimizer.step()       # 更新参数
 
         batch_loss = loss.item()
         epoch_loss += batch_loss
-        tbar.set_postfix(loss=f"{batch_loss:.4f}")
+        tbar.set_postfix(loss=f"{batch_loss:.4f}")  # 实时显示损失
 
-    return epoch_loss / len(dataloader)
+    return epoch_loss / len(dataloader)  # 返回平均训练损失
 
 
-# 单个 epoch 的验证流程
+# 验证过程，不做反向传播，关闭 Dropout 等训练专用操作
 @torch.no_grad()
 def valid_one_epoch(model, dataloader, criterion, device):
-    model.eval()
+    model.eval()  # 切换为评估模式
     epoch_loss = 0.0
 
     for lr, hr in dataloader:
@@ -53,48 +47,47 @@ def valid_one_epoch(model, dataloader, criterion, device):
         loss = criterion(sr, hr)
         epoch_loss += loss.item()
 
-    return epoch_loss / len(dataloader)
+    return epoch_loss / len(dataloader)  # 返回平均验证损失
 
 
-# 主训练逻辑
+# 主训练流程
 def train(args):
     logging.basicConfig(level=logging.INFO)
 
+    # 设置设备为 GPU（如可用），否则为 CPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 加载数据集
-    train_set = H5Dataset(args.data_path, split='train')
-    valid_set = H5Dataset(args.data_path, split='val')
+    # 使用 generate_train_valid_dataset 函数来划分训练集和验证集
+    train_set, valid_set = generate_train_valid_dataset(
+        args.data_path, train_ratio=0.8, shuffle=True)
 
-    # 自动获取 patch size（假设 HR 图像尺寸是 [C, H, W]）
-    sample_hr = train_set[0][1]
-    patch_size = sample_hr.shape[-1]
-    print(f"Auto-detected patch size from HR image: {patch_size}")
-
+    # 封装为 DataLoader
     train_loader = DataLoader(
         train_set, batch_size=args.batch_size, shuffle=True)
     valid_loader = DataLoader(
         valid_set, batch_size=args.batch_size, shuffle=False)
 
-    # 初始化模型
-    model = SwinIR(upscale=args.scale, img_size=patch_size).to(device)
+    # 初始化 SwinIR 模型
+    model = SwinIR(upscale=args.scale, img_size=args.patch_size).to(device)
 
-    # 设置损失函数和优化器
+    # 定义损失函数和优化器
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    # 创建保存模型和图像的文件夹
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    # 创建实验保存路径
+    timestamp = time.strftime("%Y%m%d-%H%M%S")  # 当前时间戳
     save_dir = os.path.join("experiments", f"{args.exp_name}_{timestamp}")
     os.makedirs(save_dir, exist_ok=True)
 
-    # 保存训练超参数
+    # 保存训练参数
     save_args(args, save_dir)
 
+    # 初始化最佳验证损失
     best_loss = float('inf')
     train_losses = []
     valid_losses = []
 
+    # 正式开始训练循环
     for epoch in range(args.epochs):
         train_loss = train_one_epoch(
             model, train_loader, criterion, optimizer, device, epoch, args.epochs)
@@ -105,10 +98,12 @@ def train(args):
 
         print(
             f"[{epoch+1}/{args.epochs}] Train Loss: {train_loss:.4f} | Valid Loss: {valid_loss:.4f}")
+
+        # ✅ 每个 epoch 结束后，打印当前时间
         print(
             f"Epoch {epoch+1} finished at {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-        # 如果当前验证损失更小，则保存模型
+        # 保存最佳模型（验证损失最低）
         if valid_loss < best_loss:
             best_loss = valid_loss
             model_path = os.path.join(save_dir, "best_model.pth")
@@ -116,26 +111,26 @@ def train(args):
             print(
                 f"✅ Best model saved at epoch {epoch+1} with valid loss {best_loss:.4f}")
 
-    # 绘制损失变化图
+    # 画出训练/验证损失变化曲线
     plot_loss_curve(train_losses, valid_losses,
                     save_path=os.path.join(save_dir, "loss.png"))
 
 
-# CLI 入口（命令行执行入口）
+# 启动训练的命令行入口
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
 
+    # 定义命令行参数（可用于运行脚本时自定义参数）
     parser.add_argument('--model_name', type=str,
                         default='swinir_gdm', help='模型名称')
-    parser.add_argument('--exp_name', type=str, default='exp', help='实验保存名')
     parser.add_argument('--data_path', type=str,
                         default='./data/dataset.h5', help='h5 数据路径')
     parser.add_argument('--batch_size', type=int, default=16, help='每个批次的样本数')
     parser.add_argument('--epochs', type=int, default=50, help='训练轮数')
     parser.add_argument('--lr', type=float, default=2e-4, help='学习率')
-    parser.add_argument('--scale', type=int, default=6,
-                        help='放大倍数（由 HR/LR 尺寸决定）')
+    parser.add_argument('--scale', type=int, default=2, help='放大倍数 (超分倍率)')
+    parser.add_argument('--patch_size', type=int, default=64, help='图像块尺寸')
 
     args = parser.parse_args()
-    train(args)
+    train(args)  # 开始训练
