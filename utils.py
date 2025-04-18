@@ -17,13 +17,11 @@ def plot_loss_curve(losses, save_path=None):
         plt.show()
 
 
-def save_args(args):
-    """保存训练参数到 output_dir/config.json"""
-    os.makedirs(args.output_dir, exist_ok=True)
-    args_dict = vars(args)
-    with open(os.path.join(args.output_dir, 'config.json'), 'w') as f:
-        json.dump(args_dict, f, indent=4)
-    print("保存训练参数到 config.json 完成")
+def save_args(args, save_dir):
+    save_path = os.path.join(save_dir, 'args.txt')
+    with open(save_path, 'w') as f:
+        for k, v in vars(args).items():
+            f.write(f'{k}: {v}\n')
 
 
 def generate_readme(args, result_msg):
