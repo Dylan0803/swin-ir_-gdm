@@ -122,15 +122,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # 定义命令行参数（可用于运行脚本时自定义参数）
-    parser.add_argument('--model_name', type=str,
-                        default='swinir_gdm', help='模型名称')
-    parser.add_argument('--data_path', type=str,
-                        default='./data/dataset.h5', help='h5 数据路径')
-    parser.add_argument('--batch_size', type=int, default=16, help='每个批次的样本数')
-    parser.add_argument('--epochs', type=int, default=50, help='训练轮数')
-    parser.add_argument('--lr', type=float, default=2e-4, help='学习率')
-    parser.add_argument('--scale', type=int, default=2, help='放大倍数 (超分倍率)')
-    parser.add_argument('--patch_size', type=int, default=64, help='图像块尺寸')
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_name', type=str, required=True, help='模型名称')
+    parser.add_argument('--exp_name', type=str,
+                        default='default_experiment', help='实验名称')
+    parser.add_argument('--data_path', type=str, required=True, help='h5 数据路径')
+    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--lr', type=float, default=0.0002)
+    parser.add_argument('--scale', type=int, default=4, help='放大倍数')
+    parser.add_argument('--patch_size', type=int, default=64)
     args = parser.parse_args()
+
+    args.output_dir = os.path.join(
+        './experiments', args.model_name, args.exp_name)
+
     train(args)  # 开始训练
