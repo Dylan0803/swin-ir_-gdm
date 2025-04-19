@@ -10,7 +10,7 @@ from tqdm import tqdm
 # 使用自定义数据集类
 from datasets.h5_dataset import ConcDatasetTorch, generate_train_valid_dataset
 from models.network_swinir import SwinIR
-from utils import plot_loss_curve, save_args
+from utils import plot_loss_lines, save_args
 
 
 # 单轮训练过程
@@ -90,7 +90,7 @@ def train(args):
         upscale=args.scale,
         in_chans=1,  # 设置为1通道
         img_size=16,  # LR图像尺寸
-        window_size=8,
+        window_size=4,  # 更小的窗口大小，更适合16x16的输入
         img_range=1.,
         depths=[6, 6, 6, 6, 6, 6],
         embed_dim=180,
@@ -101,6 +101,7 @@ def train(args):
     ).to(device)
 
     print(f"Model created with upscale factor: {args.scale}")
+    print(f"Using window_size={window_size} for {img_size}x{img_size} input images")
 
     # 定义损失函数和优化器
     criterion = nn.MSELoss()
@@ -144,8 +145,7 @@ def train(args):
                 f"✅ Best model saved at epoch {epoch+1} with valid loss {best_loss:.4f}")
 
     # 画出训练/验证损失变化曲线
-    plot_loss_curve(train_losses, valid_losses,
-                    save_path=os.path.join(save_dir, "loss.png"))
+    plot_loss_lines(args, train_losses, valid_losses)
 
 
 # 启动训练的命令行入口
