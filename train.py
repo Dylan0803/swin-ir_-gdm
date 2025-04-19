@@ -101,7 +101,7 @@ def train(args):
     ).to(device)
 
     print(f"Model created with upscale factor: {args.scale}")
-    print(f"Using window_size={window_size} for {img_size}x{img_size} input images")
+    print(f"Using window_size={model.window_size} for {model.img_size}x{model.img_size} input images")
 
     # 定义损失函数和优化器
     criterion = nn.MSELoss()
