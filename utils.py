@@ -61,45 +61,68 @@ def plot_loss_lines(args, train_losses, valid_losses):
     plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
     plt.rcParams['axes.unicode_minus'] = False
 
-    # 确保输出目录存在
-    os.makedirs(args.output_dir, exist_ok=True)
+    try:
+        # 确保基础目录存在
+        base_dir = './experiments'
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir)
+            print(f"Created base directory: {base_dir}")
 
-    # train loss
-    figure_train = plt.figure()
-    plt.plot(range(len(train_losses)), train_losses, color='r', label='Training Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training Loss Over Time')
-    plt.legend()
-    plt.grid(True)
-    save_path = os.path.join(args.output_dir, 'Train-Loss.png')
-    figure_train.savefig(save_path, dpi=600, bbox_inches='tight')
-    plt.close()
+        # 确保模型目录存在
+        model_dir = os.path.join(base_dir, args.model_name)
+        if not os.path.exists(model_dir):
+            os.makedirs(model_dir)
+            print(f"Created model directory: {model_dir}")
 
-    # valid loss
-    figure_valid = plt.figure()
-    plt.plot(range(len(valid_losses)), valid_losses, color='b', label='Validation Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Validation Loss Over Time')
-    plt.legend()
-    plt.grid(True)
-    save_path = os.path.join(args.output_dir, 'Valid-Loss.png')
-    figure_valid.savefig(save_path, dpi=600, bbox_inches='tight')
-    plt.close()
+        # 确保实验目录存在
+        if not os.path.exists(args.output_dir):
+            os.makedirs(args.output_dir)
+            print(f"Created experiment directory: {args.output_dir}")
 
-    # Combined plot
-    figure_combined = plt.figure()
-    plt.plot(range(len(train_losses)), train_losses, color='r', label='Training Loss')
-    plt.plot(range(len(valid_losses)), valid_losses, color='b', label='Validation Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training and Validation Loss Over Time')
-    plt.legend()
-    plt.grid(True)
-    save_path = os.path.join(args.output_dir, 'Combined-Loss.png')
-    figure_combined.savefig(save_path, dpi=600, bbox_inches='tight')
-    plt.close()
+        # train loss
+        figure_train = plt.figure()
+        plt.plot(range(len(train_losses)), train_losses, color='r', label='Training Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Training Loss Over Time')
+        plt.legend()
+        plt.grid(True)
+        save_path = os.path.join(args.output_dir, 'Train-Loss.png')
+        figure_train.savefig(save_path, dpi=600, bbox_inches='tight')
+        plt.close()
+        print(f"Saved training loss plot to: {save_path}")
+
+        # valid loss
+        figure_valid = plt.figure()
+        plt.plot(range(len(valid_losses)), valid_losses, color='b', label='Validation Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Validation Loss Over Time')
+        plt.legend()
+        plt.grid(True)
+        save_path = os.path.join(args.output_dir, 'Valid-Loss.png')
+        figure_valid.savefig(save_path, dpi=600, bbox_inches='tight')
+        plt.close()
+        print(f"Saved validation loss plot to: {save_path}")
+
+        # Combined plot
+        figure_combined = plt.figure()
+        plt.plot(range(len(train_losses)), train_losses, color='r', label='Training Loss')
+        plt.plot(range(len(valid_losses)), valid_losses, color='b', label='Validation Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Training and Validation Loss Over Time')
+        plt.legend()
+        plt.grid(True)
+        save_path = os.path.join(args.output_dir, 'Combined-Loss.png')
+        figure_combined.savefig(save_path, dpi=600, bbox_inches='tight')
+        plt.close()
+        print(f"Saved combined loss plot to: {save_path}")
+
+    except Exception as e:
+        print(f"Error occurred while plotting loss curves: {str(e)}")
+        # 确保所有图表都被关闭，即使发生错误
+        plt.close('all')
 
 
 if __name__ == '__main__':
