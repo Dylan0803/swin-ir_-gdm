@@ -54,47 +54,51 @@ def get_last_net_dir(models_dir, model_name):
 
 def plot_loss_lines(args, train_losses, valid_losses):
     """绘制训练与验证损失图"""
-    plt.rcParams['font.sans-serif'] = ['SimHei']
+    import matplotlib.pyplot as plt
+    import os
+    
+    # 使用默认字体，不使用SimHei
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
+    plt.rcParams['axes.unicode_minus'] = False
 
-    plot_interp_loss = False
-    plot_kdm_loss = False
-
-    interp_train_loss = 0.003315
-    kdm_train_loss = 0.002543
-    interp_valid_loss = 0.003321
-    kdm_valid_loss = 0.0025
-
-    interp_train_losses = [interp_train_loss] * len(train_losses)
-    kdm_train_losses = [kdm_train_loss] * len(train_losses)
-    interp_valid_losses = [interp_valid_loss] * len(valid_losses)
-    kdm_valid_losses = [kdm_valid_loss] * len(valid_losses)
+    # 确保输出目录存在
+    os.makedirs(args.output_dir, exist_ok=True)
 
     # train loss
     figure_train = plt.figure()
-    plt.plot(range(len(train_losses)), train_losses, color='r', label='SR')
-    if plot_interp_loss:
-        plt.plot(range(len(train_losses)), interp_train_losses,
-                 color='b', linestyle='-.', label='interp')
-    if plot_kdm_loss:
-        plt.plot(range(len(train_losses)), kdm_train_losses,
-                 color='g', linestyle='--', label='kdm')
+    plt.plot(range(len(train_losses)), train_losses, color='r', label='Training Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training Loss Over Time')
     plt.legend()
-    figure_train.savefig(os.path.join(
-        args.output_dir, 'Train-Loss.png'), dpi=600)
+    plt.grid(True)
+    save_path = os.path.join(args.output_dir, 'Train-Loss.png')
+    figure_train.savefig(save_path, dpi=600, bbox_inches='tight')
     plt.close()
 
     # valid loss
     figure_valid = plt.figure()
-    plt.plot(range(len(valid_losses)), valid_losses, color='r', label='SR')
-    if plot_interp_loss:
-        plt.plot(range(len(valid_losses)), interp_valid_losses,
-                 color='b', linestyle='-.', label='interp')
-    if plot_kdm_loss:
-        plt.plot(range(len(valid_losses)), kdm_valid_losses,
-                 color='g', linestyle='--', label='kdm')
+    plt.plot(range(len(valid_losses)), valid_losses, color='b', label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Validation Loss Over Time')
     plt.legend()
-    figure_valid.savefig(os.path.join(
-        args.output_dir, 'Valid-Loss.png'), dpi=600)
+    plt.grid(True)
+    save_path = os.path.join(args.output_dir, 'Valid-Loss.png')
+    figure_valid.savefig(save_path, dpi=600, bbox_inches='tight')
+    plt.close()
+
+    # Combined plot
+    figure_combined = plt.figure()
+    plt.plot(range(len(train_losses)), train_losses, color='r', label='Training Loss')
+    plt.plot(range(len(valid_losses)), valid_losses, color='b', label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Loss Over Time')
+    plt.legend()
+    plt.grid(True)
+    save_path = os.path.join(args.output_dir, 'Combined-Loss.png')
+    figure_combined.savefig(save_path, dpi=600, bbox_inches='tight')
     plt.close()
 
 
