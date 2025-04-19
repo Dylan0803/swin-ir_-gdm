@@ -20,23 +20,47 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, tota
     tbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{total_epochs}")  # 显示进度条
 
     for lr, hr in tbar:
-        # 确保数据维度正确
-        if len(lr.shape) == 3:
-            lr = lr.unsqueeze(0)  # 添加batch维度
-        if len(hr.shape) == 3:
-            hr = hr.unsqueeze(0)  # 添加batch维度
+        try:
+            # 确保数据维度正确
+            if len(lr.shape) == 3:
+                lr = lr.unsqueeze(0)  # 添加batch维度
+            if len(hr.shape) == 3:
+                hr = hr.unsqueeze(0)  # 添加batch维度
 
-        lr, hr = lr.to(device), hr.to(device)  # 将数据移到 GPU/CPU
-        
-        optimizer.zero_grad()  # 清空梯度
-        sr = model(lr)         # 前向传播得到预测图像
-        loss = criterion(sr, hr)  # 计算 MSE 损失
-        loss.backward()        # 反向传播
-        optimizer.step()       # 更新参数
+            lr, hr = lr.to(device), hr.to(device)  # 将数据移到 GPU/CPU
+            
+            optimizer.zero_grad()  # 清空梯度
+            sr = model(lr)         # 前向传播得到预测图像
+            loss = criterion(sr, hr)  # 计算 MSE 损失
+            
+            # 检查loss是否为NaN
+            if torch.isnan(loss):
+                print(f"Warning: NaN loss detected! Skipping batch...")
+                continue
+                
+            loss.backward()        # 反向传播
+            
+            # 梯度裁剪，防止梯度爆炸
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
+            optimizer.step()       # 更新参数
 
-        batch_loss = loss.item()
-        epoch_loss += batch_loss
-        tbar.set_postfix(loss=f"{batch_loss:.4f}")  # 实时显示损失
+            batch_loss = loss.item()
+            epoch_loss += batch_loss
+            tbar.set_postfix(loss=f"{batch_loss:.4f}")  # 实时显示损失
+
+            # 定期清理GPU缓存
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        except RuntimeError as e:
+            if "out of memory" in str(e) or "CUDNN_STATUS_" in str(e):
+                print(f"Warning: GPU error detected! Clearing cache and skipping batch...")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                continue
+            else:
+                raise e
 
     return epoch_loss / len(dataloader)  # 返回平均训练损失
 
@@ -67,8 +91,18 @@ def train(args):
     logging.basicConfig(level=logging.INFO)
     print(f"Starting training with arguments: {args}")
 
+    # CUDA设置和内存管理
+    torch.cuda.empty_cache()  # 清空GPU缓存
+    torch.backends.cudnn.benchmark = True  # 启用cuDNN自动调优
+    torch.backends.cudnn.deterministic = True  # 确保结果可复现
+    
     # 设置设备为 GPU（如可用），否则为 CPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == 'cuda':
+        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+        print(f"GPU Memory Usage:")
+        print(f"Allocated: {torch.cuda.memory_allocated(0)/1024**2:.2f} MB")
+        print(f"Cached: {torch.cuda.memory_reserved(0)/1024**2:.2f} MB")
     print(f"Using device: {device}")
 
     # 使用 generate_train_valid_dataset 函数来划分训练集和验证集
@@ -77,13 +111,17 @@ def train(args):
 
     # 封装为 DataLoader
     train_loader = DataLoader(
-        train_set, batch_size=args.batch_size, shuffle=True)
+        train_set, batch_size=args.batch_size, shuffle=True,
+        num_workers=0, pin_memory=True)  # 减少num_workers，启用pin_memory
     valid_loader = DataLoader(
-        valid_set, batch_size=args.batch_size, shuffle=False)
+        valid_set, batch_size=args.batch_size, shuffle=False,
+        num_workers=0, pin_memory=True)  # 减少num_workers，启用pin_memory
 
     # 打印数据集信息
     sample_lr, sample_hr = next(iter(train_loader))
     print(f"Data shapes - LR: {sample_lr.shape}, HR: {sample_hr.shape}")
+    print(f"Data range - LR: [{sample_lr.min():.4f}, {sample_lr.max():.4f}]")
+    print(f"Data range - HR: [{sample_hr.min():.4f}, {sample_hr.max():.4f}]")
 
     # 初始化 SwinIR 模型
     model = SwinIR(
@@ -159,9 +197,9 @@ if __name__ == "__main__":
     parser.add_argument('--exp_name', type=str,
                         default='default_experiment', help='实验名称')
     parser.add_argument('--data_path', type=str, required=True, help='h5 数据路径')
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=16, help='batch size, reduce if GPU OOM')
     parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--lr', type=float, default=0.0002)
+    parser.add_argument('--lr', type=float, default=0.0001, help='learning rate, reduced to improve stability')
     parser.add_argument('--scale', type=int, default=6, help='放大倍数')
     parser.add_argument('--patch_size', type=int, default=16, help='LR图像的patch大小')
     args = parser.parse_args()
