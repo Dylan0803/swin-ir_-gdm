@@ -56,7 +56,7 @@ def plot_loss_lines(args, train_losses, valid_losses):
     """绘制训练与验证损失图"""
     import matplotlib.pyplot as plt
     import os
-    
+
     # 使用默认字体，不使用SimHei
     plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
     plt.rcParams['axes.unicode_minus'] = False
@@ -79,6 +79,10 @@ def plot_loss_lines(args, train_losses, valid_losses):
             os.makedirs(args.output_dir)
             print(f"Created experiment directory: {args.output_dir}")
 
+        # ✅ 确保损失图目录存在
+        loss_dir = os.path.join(model_dir, 'loss_plots')
+        os.makedirs(loss_dir, exist_ok=True)
+
         # train loss
         figure_train = plt.figure()
         plt.plot(range(len(train_losses)), train_losses, color='r', label='Training Loss')
@@ -87,7 +91,7 @@ def plot_loss_lines(args, train_losses, valid_losses):
         plt.title('Training Loss Over Time')
         plt.legend()
         plt.grid(True)
-        save_path = os.path.join(args.output_dir, 'Train-Loss.png')
+        save_path = os.path.join(loss_dir, 'Train-Loss.png')
         figure_train.savefig(save_path, dpi=600, bbox_inches='tight')
         plt.close()
         print(f"Saved training loss plot to: {save_path}")
@@ -100,7 +104,7 @@ def plot_loss_lines(args, train_losses, valid_losses):
         plt.title('Validation Loss Over Time')
         plt.legend()
         plt.grid(True)
-        save_path = os.path.join(args.output_dir, 'Valid-Loss.png')
+        save_path = os.path.join(loss_dir, 'Valid-Loss.png')
         figure_valid.savefig(save_path, dpi=600, bbox_inches='tight')
         plt.close()
         print(f"Saved validation loss plot to: {save_path}")
@@ -114,14 +118,13 @@ def plot_loss_lines(args, train_losses, valid_losses):
         plt.title('Training and Validation Loss Over Time')
         plt.legend()
         plt.grid(True)
-        save_path = os.path.join(args.output_dir, 'Combined-Loss.png')
+        save_path = os.path.join(loss_dir, 'Combined-Loss.png')
         figure_combined.savefig(save_path, dpi=600, bbox_inches='tight')
         plt.close()
         print(f"Saved combined loss plot to: {save_path}")
 
     except Exception as e:
         print(f"Error occurred while plotting loss curves: {str(e)}")
-        # 确保所有图表都被关闭，即使发生错误
         plt.close('all')
 
 
