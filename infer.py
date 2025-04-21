@@ -64,7 +64,7 @@ with torch.no_grad():
     sr_tensor = model(lr_tensor)  # shape: [1,1,a,a]
     sr_image = sr_tensor.squeeze().cpu().numpy()  # shape: [a, a]
 
-# === 可选：可视化对比 ===
+# === 可选：可视化对比并保存 ===
 plt.subplot(1, 3, 1)
 plt.title("LR input")
 plt.imshow(lr_data, cmap='hot')
@@ -80,4 +80,6 @@ plt.title("Ground Truth HR")
 plt.imshow(hr_data, cmap='hot')
 plt.axis('off')
 
-plt.show()
+# 保存为图像文件，而不是直接展示
+plt.savefig('output_comparison.png')
+print("Comparison image saved as 'output_comparison.png'")
