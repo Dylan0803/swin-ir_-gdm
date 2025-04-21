@@ -66,19 +66,20 @@ with torch.no_grad():
 
 # === 可选：可视化对比并保存 ===
 plt.subplot(1, 3, 1)
-plt.title("LR input")
-plt.imshow(lr_data, cmap='hot')
+plt.title("Ground Truth HR")
+plt.imshow(hr_data, cmap='viridis')
 plt.axis('off')
 
 plt.subplot(1, 3, 2)
-plt.title("SR output")
-plt.imshow(sr_image, cmap='hot')
+plt.title("LR input")
+plt.imshow(lr_data, cmap='viridis')
 plt.axis('off')
 
 plt.subplot(1, 3, 3)
-plt.title("Ground Truth HR")
-plt.imshow(hr_data, cmap='hot')
+plt.title("SR output")
+plt.imshow(sr_image, cmap='viridis')
 plt.axis('off')
+
 
 # 保存为图像文件，而不是直接展示
 plt.savefig('output_comparison.png')
