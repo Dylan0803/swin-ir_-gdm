@@ -12,6 +12,8 @@ import pandas as pd
 from datasets.h5_dataset import ConcDatasetTorch, generate_train_valid_dataset
 from models.network_swinir import SwinIR
 from utils import plot_loss_lines, save_args
+# === 新增导入 ===
+from weighted_mse import WeightedMSELoss
 
 
 # 单轮训练过程
@@ -143,7 +145,9 @@ def train(args):
     print(f"Using window_size=4 for 16x16 input images")
 
     # 定义损失函数和优化器
-    criterion = nn.MSELoss()
+    # === 替换 criterion 定义部分 ===
+    # criterion = nn.MSELoss()
+    criterion = WeightedMSELoss(alpha=1.0, beta=0.3, threshold=0.05)  # 可按需调整超参数
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # 创建实验保存路径
