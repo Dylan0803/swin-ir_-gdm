@@ -145,8 +145,8 @@ def train(args):
     print(f"Using window_size=4 for 16x16 input images")
 
     # 定义损失函数和优化器
-    # === 替换 criterion 定义部分 ===
     criterion = nn.MSELoss()
+    # === 替换 criterion 定义部分 ===
     #criterion = WeightedMSELoss(alpha=1.0, beta=0.3, threshold=0.05)  # 可按需调整超参数
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
