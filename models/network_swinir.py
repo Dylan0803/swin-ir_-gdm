@@ -363,7 +363,7 @@ class BasicLayer(nn.Module):
         drop_path (float | tuple[float], optional): Stochastic depth rate. Default: 0.0
         norm_layer (nn.Module, optional): Normalization layer. Default: nn.LayerNorm
         downsample (nn.Module | None, optional): Downsample layer at the end of the layer. Default: None
-        use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False
+        use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False.
     """
 
     def __init__(self, dim, input_resolution, depth, num_heads, window_size,
@@ -605,42 +605,14 @@ class UpsampleOneStep(nn.Sequential):
         self.num_feat = num_feat
         self.input_resolution = input_resolution
         m = []
-        # 使用两步上采样方法，先用1x1卷积减少通道间扩散
-        m.append(nn.Conv2d(num_feat, num_feat, 1, 1, 0))  # 1x1卷积减少通道间混合
         m.append(nn.Conv2d(num_feat, (scale ** 2) * num_out_ch, 3, 1, 1))
         m.append(nn.PixelShuffle(scale))
         super(UpsampleOneStep, self).__init__(*m)
 
     def flops(self):
         H, W = self.input_resolution
-        flops = H * W * self.num_feat * self.num_feat * 1 * 1  # 1x1 conv
-        flops += H * W * self.num_feat * 3 * 3 * 9  # 3x3 conv
+        flops = H * W * self.num_feat * 3 * 9
         return flops
-
-
-# 创建ZeroPreservingBlock
-class ZeroPreservingBlock(nn.Module):
-    """
-    零值保持模块，通过添加门控机制，保持输入图像中的零值区域
-    """
-    def __init__(self, channels):
-        super(ZeroPreservingBlock, self).__init__()
-        self.gate = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0),
-            nn.Sigmoid()
-        )
-        
-    def forward(self, x, x_orig):
-        # 创建零值区域掩码
-        zero_mask = (x_orig.abs() < 1e-6).float()
-        
-        # 生成门控权重
-        gate_weights = self.gate(x)
-        
-        # 应用门控：在非零区域使用网络预测值，在零区域保持为零
-        x = x * (1 - zero_mask) * gate_weights
-        
-        return x
 
 
 class SwinIR(nn.Module):
@@ -669,7 +641,6 @@ class SwinIR(nn.Module):
         img_range: Image range. 1. or 255.
         upsampler: The reconstruction reconstruction module. 'pixelshuffle'/'pixelshuffledirect'/'nearest+conv'/None
         resi_connection: The convolutional block before residual connection. '1conv'/'3conv'
-        preserve_zero: Whether to use zero preservation mechanism. Default: True
     """
 
     def __init__(self, img_size=64, patch_size=1, in_chans=3,
@@ -678,7 +649,7 @@ class SwinIR(nn.Module):
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
                  use_checkpoint=False, upscale=2, img_range=1., upsampler='', resi_connection='1conv',
-                 preserve_zero=True, **kwargs):
+                 **kwargs):
         super(SwinIR, self).__init__()
         num_in_ch = in_chans
         num_out_ch = in_chans
@@ -692,7 +663,6 @@ class SwinIR(nn.Module):
         self.upscale = upscale
         self.upsampler = upsampler
         self.window_size = window_size
-        self.preserve_zero = preserve_zero
 
         #####################################################################################################
         ################################### 1, shallow feature extraction ###################################
@@ -774,11 +744,11 @@ class SwinIR(nn.Module):
             self.upsample = Upsample(upscale, num_feat)
             self.conv_last = nn.Conv2d(num_feat, num_out_ch, 3, 1, 1)
         elif self.upsampler == 'pixelshuffledirect':
-            # for lightweight SR
+            # for lightweight SR (to save parameters)
             self.upsample = UpsampleOneStep(upscale, embed_dim, num_out_ch,
                                             (patches_resolution[0], patches_resolution[1]))
         elif self.upsampler == 'nearest+conv':
-            # for real-world SR
+            # for real-world SR (less artifacts)
             self.conv_before_upsample = nn.Sequential(nn.Conv2d(embed_dim, num_feat, 3, 1, 1),
                                                       nn.LeakyReLU(inplace=True))
             self.conv_up1 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
@@ -790,10 +760,6 @@ class SwinIR(nn.Module):
         else:
             # for image denoising and JPEG compression artifact reduction
             self.conv_last = nn.Conv2d(embed_dim, num_out_ch, 3, 1, 1)
-            
-        # 添加零值保持模块
-        if self.preserve_zero:
-            self.zero_preserver = ZeroPreservingBlock(num_out_ch)
 
         self.apply(self._init_weights)
 
@@ -838,8 +804,6 @@ class SwinIR(nn.Module):
 
     def forward(self, x):
         H, W = x.shape[2:]
-        x_original = x  # 保存原始输入用于强残差连接
-        
         x = self.check_image_size(x)
         
         self.mean = self.mean.type_as(x)
@@ -873,22 +837,7 @@ class SwinIR(nn.Module):
 
         x = x / self.img_range + self.mean
 
-        # 裁剪到目标尺寸
-        x = x[:, :, :H*self.upscale, :W*self.upscale]
-        
-        # 添加强化残差连接 - 只针对0值区域
-        if self.upscale > 1:
-            # 将原始输入上采样到相同尺寸
-            x_upscaled = F.interpolate(x_original, scale_factor=self.upscale, 
-                                      mode='bicubic', align_corners=False)
-            
-            # 创建零值区域掩码
-            zero_mask = (x_upscaled.abs() < 1e-6).float()
-            
-            # 在零值区域使用上采样的原图，在非零区域使用模型输出
-            x = x * (1 - zero_mask) + x_upscaled * zero_mask
-        
-        return x
+        return x[:, :, :H*self.upscale, :W*self.upscale]
 
     def flops(self):
         flops = 0
