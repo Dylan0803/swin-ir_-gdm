@@ -3,14 +3,15 @@ from models.network_swinir import SwinIR
 import h5py
 import numpy as np
 import argparse
-import matplotlib.pyplot as plt
 import os
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # === 命令行参数设置 ===
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="SwinIR Inference")
+    parser = argparse.ArgumentParser(description="SwinIR Inference with Plotly Visualization")
     parser.add_argument('--model_path', type=str,
                         default='./experiments/my_exp_20250418-153000/best_model.pth', help='模型路径')
     parser.add_argument('--data_path', type=str,
@@ -20,8 +21,8 @@ def parse_args():
     parser.add_argument('--scale', type=int, default=6, help='放大倍数，和训练时一致')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available()
                         else 'cpu', help='设备类型: cuda 或 cpu')
-    parser.add_argument('--interactive', action='store_true', help='是否启用交互模式')
     parser.add_argument('--output_dir', type=str, default='./results', help='输出目录')
+    parser.add_argument('--save_html', action='store_true', help='是否保存HTML文件而不是显示')
     return parser.parse_args()
 
 
@@ -34,8 +35,8 @@ data_path = args.data_path    # h5 文件路径
 sample_index = args.sample_index  # 测试第几个样本（比如0）
 scale = args.scale            # 放大倍数，和训练时一致
 device = torch.device(args.device)  # 使用指定的设备
-interactive = args.interactive  # 是否启用交互模式
 output_dir = args.output_dir   # 输出目录
+save_html = args.save_html     # 是否保存HTML而不是显示
 
 # 创建输出目录
 os.makedirs(output_dir, exist_ok=True)
@@ -72,87 +73,121 @@ with torch.no_grad():
     sr_tensor = model(lr_tensor)  # shape: [1,1,a,a]
     sr_image = sr_tensor.squeeze().cpu().numpy()  # shape: [a, a]
 
-if interactive:
-    # === 创建交互式显示 ===
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    
-    # 显示图像
-    im1 = axes[0].imshow(hr_data, cmap='viridis')
-    axes[0].set_title("Ground Truth HR")
-    fig.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
-    axes[0].axis('off')
-    
-    im2 = axes[1].imshow(lr_data, cmap='viridis')
-    axes[1].set_title("LR input")
-    fig.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
-    axes[1].axis('off')
-    
-    im3 = axes[2].imshow(sr_image, cmap='viridis')
-    axes[2].set_title("SR output")
-    fig.colorbar(im3, ax=axes[2], fraction=0.046, pad=0.04)
-    axes[2].axis('off')
-    
-    # 添加像素值显示
-    pixel_info = plt.figtext(0.5, 0.01, "鼠标悬停以查看像素值", 
-                            ha="center", fontsize=12, 
-                            bbox={"facecolor":"white", "alpha":0.5, "pad":5})
-    
-    def format_coord(x, y, ax_idx):
-        if ax_idx == 0 and 0 <= int(x + 0.5) < hr_data.shape[1] and 0 <= int(y + 0.5) < hr_data.shape[0]:
-            z = hr_data[int(y + 0.5), int(x + 0.5)]
-            return f'Ground Truth HR: x={int(x + 0.5)}, y={int(y + 0.5)}, 值={z:.6f}'
-        elif ax_idx == 1 and 0 <= int(x + 0.5) < lr_data.shape[1] and 0 <= int(y + 0.5) < lr_data.shape[0]:
-            z = lr_data[int(y + 0.5), int(x + 0.5)]
-            return f'LR input: x={int(x + 0.5)}, y={int(y + 0.5)}, 值={z:.6f}'
-        elif ax_idx == 2 and 0 <= int(x + 0.5) < sr_image.shape[1] and 0 <= int(y + 0.5) < sr_image.shape[0]:
-            z = sr_image[int(y + 0.5), int(x + 0.5)]
-            return f'SR output: x={int(x + 0.5)}, y={int(y + 0.5)}, 值={z:.6f}'
-        return ""
-    
-    # 自定义坐标格式化函数
-    for i, ax in enumerate(axes):
-        ax.format_coord = lambda x, y, i=i: format_coord(x, y, i)
-    
-    def hover(event):
-        if event.inaxes in axes:
-            ax_idx = axes.index(event.inaxes)
-            if event.xdata is not None and event.ydata is not None:
-                text = format_coord(event.xdata, event.ydata, ax_idx)
-                pixel_info.set_text(text)
-    
-    fig.canvas.mpl_connect('motion_notify_event', hover)
-    
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.1)  # 为底部的文本腾出空间
-    
-    # 保存图像
-    plt.savefig(os.path.join(output_dir, 'comparison.png'), dpi=300, bbox_inches='tight')
-    print(f"对比图像已保存到 {os.path.join(output_dir, 'comparison.png')}")
-    
-    # 显示交互式图像
-    plt.show()
+# === 使用Plotly创建交互式可视化 ===
+# 创建包含3个子图的figure
+fig = make_subplots(
+    rows=1, cols=3,
+    subplot_titles=("Ground Truth HR", "LR Input", "SR Output"),
+    horizontal_spacing=0.05
+)
+
+# 添加热力图
+fig.add_trace(
+    go.Heatmap(
+        z=hr_data,
+        colorscale='Viridis',
+        colorbar=dict(
+            title="像素值",
+            x=0.3,  # 调整颜色条位置
+        ),
+        hovertemplate='位置: (%{x}, %{y})<br>值: %{z:.6f}<extra></extra>'
+    ),
+    row=1, col=1
+)
+
+fig.add_trace(
+    go.Heatmap(
+        z=lr_data,
+        colorscale='Viridis',
+        colorbar=dict(
+            title="像素值",
+            x=0.63,  # 调整颜色条位置
+        ),
+        hovertemplate='位置: (%{x}, %{y})<br>值: %{z:.6f}<extra></extra>'
+    ),
+    row=1, col=2
+)
+
+fig.add_trace(
+    go.Heatmap(
+        z=sr_image,
+        colorscale='Viridis',
+        colorbar=dict(
+            title="像素值",
+            x=0.96,  # 调整颜色条位置
+        ),
+        hovertemplate='位置: (%{x}, %{y})<br>值: %{z:.6f}<extra></extra>'
+    ),
+    row=1, col=3
+)
+
+# 更新布局
+fig.update_layout(
+    title="SwinIR 超分辨率结果 - 交互式像素值可视化",
+    height=600,
+    width=1200,
+    hoverlabel=dict(
+        bgcolor="white",
+        font_size=12,
+        font_family="Arial"
+    ),
+    margin=dict(l=50, r=50, t=80, b=50),
+)
+
+# 添加数据统计信息
+hr_stats = f"HR统计: 最小值={hr_data.min():.6f}, 最大值={hr_data.max():.6f}, 均值={hr_data.mean():.6f}, 标准差={hr_data.std():.6f}"
+lr_stats = f"LR统计: 最小值={lr_data.min():.6f}, 最大值={lr_data.max():.6f}, 均值={lr_data.mean():.6f}, 标准差={lr_data.std():.6f}"
+sr_stats = f"SR统计: 最小值={sr_image.min():.6f}, 最大值={sr_image.max():.6f}, 均值={sr_image.mean():.6f}, 标准差={sr_image.std():.6f}"
+
+fig.add_annotation(
+    text=hr_stats,
+    x=0,
+    y=1.1,
+    xref="paper",
+    yref="paper",
+    showarrow=False,
+    font=dict(size=10)
+)
+
+fig.add_annotation(
+    text=lr_stats,
+    x=0.33,
+    y=1.1,
+    xref="paper",
+    yref="paper",
+    showarrow=False,
+    font=dict(size=10)
+)
+
+fig.add_annotation(
+    text=sr_stats,
+    x=0.66,
+    y=1.1,
+    xref="paper",
+    yref="paper",
+    showarrow=False,
+    font=dict(size=10)
+)
+
+# 输出统计信息到控制台
+print("数据统计信息:")
+print(hr_stats)
+print(lr_stats)
+print(sr_stats)
+
+# 保存HTML文件或显示
+if save_html:
+    html_path = os.path.join(output_dir, 'swinir_interactive.html')
+    fig.write_html(html_path)
+    print(f"交互式可视化已保存到: {html_path}")
 else:
-    # === 非交互式可视化对比并保存 ===
-    plt.figure(figsize=(15, 5))
-    
-    plt.subplot(1, 3, 1)
-    plt.title("Ground Truth HR")
-    plt.imshow(hr_data, cmap='viridis')
-    plt.colorbar(fraction=0.046, pad=0.04)
-    plt.axis('off')
-    
-    plt.subplot(1, 3, 2)
-    plt.title("LR input")
-    plt.imshow(lr_data, cmap='viridis')
-    plt.colorbar(fraction=0.046, pad=0.04)
-    plt.axis('off')
-    
-    plt.subplot(1, 3, 3)
-    plt.title("SR output")
-    plt.imshow(sr_image, cmap='viridis')
-    plt.colorbar(fraction=0.046, pad=0.04)
-    plt.axis('off')
-    
-    # 保存为图像文件
-    plt.savefig(os.path.join(output_dir, 'comparison.png'), dpi=300, bbox_inches='tight')
-    print(f"对比图像已保存到 {os.path.join(output_dir, 'comparison.png')}")
+    # 尝试导入plotly所需的离线显示模块
+    try:
+        import plotly.io as pio
+        pio.renderers.default = "browser"  # 在浏览器中打开
+        fig.show()
+    except ImportError:
+        # 如果导入失败，则保存为HTML
+        html_path = os.path.join(output_dir, 'swinir_interactive.html')
+        fig.write_html(html_path)
+        print(f"无法显示，已保存交互式可视化到: {html_path}")
