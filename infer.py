@@ -6,6 +6,15 @@ import argparse
 import os
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import sys
+
+# === 检测是否在Google Colab环境中 ===
+def is_in_colab():
+    try:
+        import google.colab
+        return True
+    except ImportError:
+        return False
 
 # === 命令行参数设置 ===
 
@@ -37,6 +46,12 @@ scale = args.scale            # 放大倍数，和训练时一致
 device = torch.device(args.device)  # 使用指定的设备
 output_dir = args.output_dir   # 输出目录
 save_html = args.save_html     # 是否保存HTML而不是显示
+
+# 如果在Colab中，强制保存HTML
+in_colab = is_in_colab()
+if in_colab:
+    save_html = True
+    print("检测到Google Colab环境，将自动保存HTML文件")
 
 # 创建输出目录
 os.makedirs(output_dir, exist_ok=True)
@@ -175,19 +190,31 @@ print(hr_stats)
 print(lr_stats)
 print(sr_stats)
 
-# 保存HTML文件或显示
-if save_html:
-    html_path = os.path.join(output_dir, 'swinir_interactive.html')
-    fig.write_html(html_path)
-    print(f"交互式可视化已保存到: {html_path}")
-else:
-    # 尝试导入plotly所需的离线显示模块
+# 保存HTML文件
+html_path = os.path.join(output_dir, 'swinir_interactive.html')
+fig.write_html(html_path)
+print(f"交互式可视化已保存到: {html_path}")
+
+# 如果在Colab环境中，提供显示HTML的代码
+if in_colab:
+    from IPython.display import IFrame, display, HTML
+    print("\n在Colab中查看可视化结果，请运行以下代码：")
+    display_code = f"""
+    from IPython.display import IFrame
+    IFrame(src='{html_path}', width=1200, height=700)
+    """
+    print(display_code)
+    
+    # 如果直接从Colab运行，尝试自动显示
     try:
-        import plotly.io as pio
-        pio.renderers.default = "browser"  # 在浏览器中打开
-        fig.show()
-    except ImportError:
-        # 如果导入失败，则保存为HTML
-        html_path = os.path.join(output_dir, 'swinir_interactive.html')
-        fig.write_html(html_path)
-        print(f"无法显示，已保存交互式可视化到: {html_path}")
+        display(IFrame(src=html_path, width=1200, height=700))
+    except:
+        pass
+elif not save_html:
+    # 在普通环境中尝试打开浏览器，如果失败则给出提示
+    try:
+        import webbrowser
+        webbrowser.open('file://' + os.path.abspath(html_path))
+    except Exception as e:
+        print(f"无法自动打开浏览器: {e}")
+        print(f"请手动打开以下文件: {os.path.abspath(html_path)}")
