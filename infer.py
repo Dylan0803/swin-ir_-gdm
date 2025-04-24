@@ -4,6 +4,8 @@ import h5py
 import numpy as np
 import argparse
 import matplotlib.pyplot as plt
+import pandas as pd
+import os
 
 # === 命令行参数设置 ===
 
@@ -19,8 +21,8 @@ def parse_args():
     parser.add_argument('--scale', type=int, default=6, help='放大倍数，和训练时一致')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available()
                         else 'cpu', help='设备类型: cuda 或 cpu')
-    parser.add_argument('--output_file', type=str, default='comparison_data.npz', 
-                        help='保存比较数据的文件名')
+    parser.add_argument('--output_dir', type=str, default='results', 
+                        help='保存比较数据的目录')
     return parser.parse_args()
 
 
@@ -33,7 +35,10 @@ data_path = args.data_path  # h5 文件路径
 sample_index = args.sample_index  # 测试第几个样本（比如0）
 scale = args.scale  # 放大倍数，和训练时一致
 device = torch.device(args.device)  # 使用指定的设备
-output_file = args.output_file  # 输出文件名
+output_dir = args.output_dir  # 输出目录
+
+# 确保输出目录存在
+os.makedirs(output_dir, exist_ok=True)
 
 # === 加载模型 ===
 model = SwinIR(
@@ -81,9 +86,38 @@ print(f"SR 形状: {sr_image.shape}, 最小值: {sr_image.min():.6f}, 最大值:
 print(f"差异 - 最小值: {diff.min():.6f}, 最大值: {diff.max():.6f}, 均值: {diff.mean():.6f}")
 print(f"MSE: {mse:.6f}, PSNR: {psnr:.2f} dB, MAE: {mae:.6f}")
 
-# 保存数据以便进一步分析
-np.savez(output_file, hr=hr_data, sr=sr_image, diff=diff)
-print(f"数据已保存到 {output_file} 文件中")
+# === 保存统计结果为CSV ===
+stats_df = pd.DataFrame({
+    '指标': ['最小值', '最大值', '均值', 'MSE', 'PSNR', 'MAE'],
+    'HR': [hr_data.min(), hr_data.max(), hr_data.mean(), np.nan, np.nan, np.nan],
+    'SR': [sr_image.min(), sr_image.max(), sr_image.mean(), np.nan, np.nan, np.nan],
+    '差异': [diff.min(), diff.max(), diff.mean(), mse, psnr, mae]
+})
+stats_file = os.path.join(output_dir, f'sample_{sample_index}_stats.csv')
+stats_df.to_csv(stats_file, index=False, encoding='utf-8-sig')
+print(f"统计数据已保存到 {stats_file}")
+
+# === 保存图像数据为CSV ===
+# 转换2D数组为1D并创建DataFrame
+hr_flat = hr_data.flatten()
+sr_flat = sr_image.flatten()
+diff_flat = diff.flatten()
+
+# 创建位置索引
+positions = [f"({i//hr_data.shape[1]},{i%hr_data.shape[1]})" for i in range(len(hr_flat))]
+
+# 创建数据框
+data_df = pd.DataFrame({
+    '位置': positions,
+    'HR': hr_flat,
+    'SR': sr_flat,
+    '差异': diff_flat
+})
+
+# 保存为CSV
+data_file = os.path.join(output_dir, f'sample_{sample_index}_data.csv')
+data_df.to_csv(data_file, index=False, encoding='utf-8-sig')
+print(f"像素数据已保存到 {data_file}")
 
 # === 可视化对比并保存 ===
 plt.figure(figsize=(15, 12))
@@ -126,5 +160,6 @@ plt.grid(True)
 
 # 保存为图像文件，而不是直接展示
 plt.tight_layout()
-plt.savefig('output_comparison.png', dpi=300)
-print("分析图像已保存为 'output_comparison.png'")
+image_file = os.path.join(output_dir, f'sample_{sample_index}_comparison.png')
+plt.savefig(image_file, dpi=300)
+print(f"分析图像已保存为 {image_file}")
