@@ -363,7 +363,7 @@ class BasicLayer(nn.Module):
         drop_path (float | tuple[float], optional): Stochastic depth rate. Default: 0.0
         norm_layer (nn.Module, optional): Normalization layer. Default: nn.LayerNorm
         downsample (nn.Module | None, optional): Downsample layer at the end of the layer. Default: None
-        use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False.
+        use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False
     """
 
     def __init__(self, dim, input_resolution, depth, num_heads, window_size,
@@ -433,7 +433,7 @@ class RSTB(nn.Module):
         drop_path (float | tuple[float], optional): Stochastic depth rate. Default: 0.0
         norm_layer (nn.Module, optional): Normalization layer. Default: nn.LayerNorm
         downsample (nn.Module | None, optional): Downsample layer at the end of the layer. Default: None
-        use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False.
+        use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False
         img_size: Input image size.
         patch_size: Patch size.
         resi_connection: The convolutional block before residual connection.
@@ -586,8 +586,20 @@ class Upsample(nn.Sequential):
         elif scale == 3:
             m.append(nn.Conv2d(num_feat, 9 * num_feat, 3, 1, 1))
             m.append(nn.PixelShuffle(3))
+        elif scale == 6:  # 支持6倍超分辨率，通过2×3或3×2实现
+            # 方案1: 先2倍再3倍
+            m.append(nn.Conv2d(num_feat, 4 * num_feat, 3, 1, 1))
+            m.append(nn.PixelShuffle(2))
+            m.append(nn.Conv2d(num_feat, 9 * num_feat, 3, 1, 1))
+            m.append(nn.PixelShuffle(3))
+            
+            # 方案2(替代方案): 先3倍再2倍
+            # m.append(nn.Conv2d(num_feat, 9 * num_feat, 3, 1, 1))
+            # m.append(nn.PixelShuffle(3))
+            # m.append(nn.Conv2d(num_feat, 4 * num_feat, 3, 1, 1))
+            # m.append(nn.PixelShuffle(2))
         else:
-            raise ValueError(f'scale {scale} is not supported. ' 'Supported scales: 2^n and 3.')
+            raise ValueError(f'scale {scale} is not supported. ' 'Supported scales: 2^n, 3, and 6.')
         super(Upsample, self).__init__(*m)
 
 
@@ -605,8 +617,19 @@ class UpsampleOneStep(nn.Sequential):
         self.num_feat = num_feat
         self.input_resolution = input_resolution
         m = []
-        m.append(nn.Conv2d(num_feat, (scale ** 2) * num_out_ch, 3, 1, 1))
-        m.append(nn.PixelShuffle(scale))
+        if scale == 6:
+            # 方案1: 直接一步到位的6倍上采样
+            m.append(nn.Conv2d(num_feat, (6**2) * num_out_ch, 3, 1, 1))
+            m.append(nn.PixelShuffle(6))
+            
+            # 方案2: 两步上采样(可能效果更好但参数更多)
+            # m.append(nn.Conv2d(num_feat, 4 * num_feat, 3, 1, 1))
+            # m.append(nn.PixelShuffle(2))
+            # m.append(nn.Conv2d(num_feat, 9 * num_out_ch, 3, 1, 1))
+            # m.append(nn.PixelShuffle(3))
+        else:
+            m.append(nn.Conv2d(num_feat, (scale ** 2) * num_out_ch, 3, 1, 1))
+            m.append(nn.PixelShuffle(scale))
         super(UpsampleOneStep, self).__init__(*m)
 
     def flops(self):
@@ -744,16 +767,19 @@ class SwinIR(nn.Module):
             self.upsample = Upsample(upscale, num_feat)
             self.conv_last = nn.Conv2d(num_feat, num_out_ch, 3, 1, 1)
         elif self.upsampler == 'pixelshuffledirect':
-            # for lightweight SR (to save parameters)
+            # for lightweight SR
             self.upsample = UpsampleOneStep(upscale, embed_dim, num_out_ch,
                                             (patches_resolution[0], patches_resolution[1]))
         elif self.upsampler == 'nearest+conv':
-            # for real-world SR (less artifacts)
+            # for real-world SR
             self.conv_before_upsample = nn.Sequential(nn.Conv2d(embed_dim, num_feat, 3, 1, 1),
                                                       nn.LeakyReLU(inplace=True))
             self.conv_up1 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
             if self.upscale == 4:
                 self.conv_up2 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+            elif self.upscale == 6:
+                self.conv_up2 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+                self.conv_up3 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
             self.conv_hr = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
             self.conv_last = nn.Conv2d(num_feat, num_out_ch, 3, 1, 1)
             self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
@@ -828,6 +854,10 @@ class SwinIR(nn.Module):
             x = self.lrelu(self.conv_up1(torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')))
             if self.upscale == 4:
                 x = self.lrelu(self.conv_up2(torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')))
+            elif self.upscale == 6:
+                # 采用三次放大实现6倍上采样：2×1.5×2 = 6
+                x = self.lrelu(self.conv_up2(torch.nn.functional.interpolate(x, scale_factor=1.5, mode='nearest')))
+                x = self.lrelu(self.conv_up3(torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')))
             x = self.conv_last(self.lrelu(self.conv_hr(x)))
         else:
             # for image denoising and JPEG compression artifact reduction
