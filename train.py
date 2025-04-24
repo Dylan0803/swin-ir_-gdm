@@ -12,8 +12,8 @@ import pandas as pd
 from datasets.h5_dataset import ConcDatasetTorch, generate_train_valid_dataset
 from models.network_swinir import SwinIR
 from utils import plot_loss_lines, save_args
-# === 新增导入 ===
 from weighted_mse import WeightedMSELoss
+
 
 
 # 单轮训练过程
@@ -93,6 +93,7 @@ def valid_one_epoch(model, dataloader, criterion, device):
 def train(args):
     logging.basicConfig(level=logging.INFO)
     print(f"Starting training with arguments: {args}")
+    print(f"Using weighted MSE loss - Alpha: {args.alpha}, Beta: {args.beta}, Threshold: {args.threshold}")
 
     # CUDA设置和内存管理
     torch.cuda.empty_cache()  # 清空GPU缓存
@@ -145,9 +146,7 @@ def train(args):
     print(f"Using window_size=4 for 16x16 input images")
 
     # 定义损失函数和优化器
-    criterion = nn.MSELoss()
-    # === 替换 criterion 定义部分 ===
-    #criterion = WeightedMSELoss(alpha=1.0, beta=0.3, threshold=0.05)  # 可按需调整超参数
+    criterion = WeightedMSELoss(alpha=args.alpha, beta=args.beta, threshold=args.threshold)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # 创建实验保存路径
@@ -233,6 +232,7 @@ def train(args):
     print("Training completed!")
     print(f"Best validation loss: {best_loss:.4f}")
     print(f"Model and checkpoints saved in {save_dir}")
+    print(f"Loss function parameters - Alpha: {args.alpha}, Beta: {args.beta}, Threshold: {args.threshold}")
     
     return model, train_losses, valid_losses, best_loss
 
@@ -253,6 +253,9 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=0.0001, help='learning rate, reduced to improve stability')
     parser.add_argument('--scale', type=int, default=6, help='放大倍数')
     parser.add_argument('--patch_size', type=int, default=16, help='LR图像的patch大小')
+    parser.add_argument('--alpha', type=float, default=1.0, help='高浓度区域损失权重')
+    parser.add_argument('--beta', type=float, default=0.3, help='背景区域损失权重')
+    parser.add_argument('--threshold', type=float, default=0.05, help='区分背景和有浓度区域的阈值')
     args = parser.parse_args()
 
     args.output_dir = os.path.join(
