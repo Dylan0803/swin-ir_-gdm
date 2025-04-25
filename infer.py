@@ -23,6 +23,11 @@ def parse_args():
                         else 'cpu', help='设备类型: cuda 或 cpu')
     parser.add_argument('--output_dir', type=str, default='results', 
                         help='保存比较数据的目录')
+    parser.add_argument('--upsampler', type=str, default='pixelshuffle',
+                       choices=['pixelshuffle', 'pixelshuffledirect', 'nearest+conv'],
+                       help='上采样方法: pixelshuffle, pixelshuffledirect, nearest+conv')
+    parser.add_argument('--patch_size', type=int, default=16,
+                       help='LR图像的patch大小')
     return parser.parse_args()
 
 
@@ -36,26 +41,107 @@ sample_index = args.sample_index  # 测试第几个样本（比如0）
 scale = args.scale  # 放大倍数，和训练时一致
 device = torch.device(args.device)  # 使用指定的设备
 output_dir = args.output_dir  # 输出目录
+upsampler = args.upsampler  # 上采样方法
+patch_size = args.patch_size  # LR图像尺寸
 
 # 确保输出目录存在
 os.makedirs(output_dir, exist_ok=True)
 
-# === 加载模型 ===
-model = SwinIR(
-    upscale=scale,
-    in_chans=1,
-    img_size=16,
-    window_size=4,
-    img_range=1.,
-    depths=[6, 6, 6, 6],
-    embed_dim=60,
-    num_heads=[6, 6, 6, 6],
-    mlp_ratio=2,
-    upsampler='pixelshuffledirect',
-    resi_connection='1conv'
-).to(device)
+# 尝试从checkpoint加载模型配置
+try:
+    checkpoint = torch.load(model_path, map_location=device)
+    if isinstance(checkpoint, dict) and 'model_config' in checkpoint:
+        print("使用checkpoint中的模型配置")
+        model_config = checkpoint['model_config']
+        model = SwinIR(**model_config).to(device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        # 手动配置模型
+        print("使用命令行参数配置模型")
+        window_size = 4 if patch_size <= 16 else 8
+        
+        # 根据上采样器类型配置模型参数
+        if upsampler == 'pixelshuffle':
+            model = SwinIR(
+                upscale=scale,
+                in_chans=1,
+                img_size=patch_size,
+                window_size=window_size,
+                img_range=1.,
+                depths=[8, 8, 8, 8],
+                embed_dim=96,
+                num_heads=[8, 8, 8, 8],
+                mlp_ratio=4,
+                upsampler=upsampler,
+                resi_connection='1conv'
+            ).to(device)
+        elif upsampler == 'pixelshuffledirect':
+            model = SwinIR(
+                upscale=scale,
+                in_chans=1,
+                img_size=patch_size,
+                window_size=window_size,
+                img_range=1.,
+                depths=[6, 6, 6, 6],
+                embed_dim=60,
+                num_heads=[6, 6, 6, 6],
+                mlp_ratio=2,
+                upsampler=upsampler,
+                resi_connection='1conv'
+            ).to(device)
+        elif upsampler == 'nearest+conv':
+            model = SwinIR(
+                upscale=scale,
+                in_chans=1,
+                img_size=patch_size,
+                window_size=window_size,
+                img_range=1.,
+                depths=[6, 6, 6, 6],
+                embed_dim=80,
+                num_heads=[8, 8, 8, 8],
+                mlp_ratio=3,
+                upsampler=upsampler,
+                resi_connection='1conv'
+            ).to(device)
+        else:
+            # 默认配置
+            model = SwinIR(
+                upscale=scale,
+                in_chans=1,
+                img_size=patch_size,
+                window_size=window_size,
+                img_range=1.,
+                depths=[6, 6, 6, 6],
+                embed_dim=60,
+                num_heads=[6, 6, 6, 6],
+                mlp_ratio=2,
+                upsampler='pixelshuffle',
+                resi_connection='1conv'
+            ).to(device)
+            
+        model.load_state_dict(torch.load(model_path, map_location=device))
+except Exception as e:
+    print(f"加载模型时出错: {e}")
+    print("使用默认模型配置")
+    # 使用默认配置
+    model = SwinIR(
+        upscale=scale,
+        in_chans=1,
+        img_size=16,
+        window_size=4,
+        img_range=1.,
+        depths=[6, 6, 6, 6],
+        embed_dim=60,
+        num_heads=[6, 6, 6, 6],
+        mlp_ratio=2,
+        upsampler='pixelshuffle',
+        resi_connection='1conv'
+    ).to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
 
-model.load_state_dict(torch.load(model_path, map_location=device))
+# 打印模型信息
+print(f"模型已加载，使用上采样器: {upsampler}, 放大倍数: {scale}")
+
 model.eval()
 
 # === 加载一个测试样本 ===
@@ -86,6 +172,29 @@ print(f"SR 形状: {sr_image.shape}, 最小值: {sr_image.min():.6f}, 最大值:
 print(f"差异 - 最小值: {diff.min():.6f}, 最大值: {diff.max():.6f}, 均值: {diff.mean():.6f}")
 print(f"MSE: {mse:.6f}, PSNR: {psnr:.2f} dB, MAE: {mae:.6f}")
 
+# === 零值区域单独分析 ===
+# 找出HR中的零值区域
+zero_mask = hr_data < 1e-6
+zero_pixels = np.count_nonzero(zero_mask)
+total_pixels = hr_data.size
+
+if zero_pixels > 0:
+    zero_mse = np.mean(np.square(hr_data[zero_mask] - sr_image[zero_mask]))
+    zero_mae = np.mean(np.abs(hr_data[zero_mask] - sr_image[zero_mask]))
+    print("\n=== 零值区域分析 ===")
+    print(f"零值区域像素数: {zero_pixels} ({zero_pixels/total_pixels*100:.2f}%)")
+    print(f"零值区域 - MSE: {zero_mse:.6f}, MAE: {zero_mae:.6f}")
+    
+    # 非零区域的指标
+    non_zero_mask = ~zero_mask
+    non_zero_mse = np.mean(np.square(hr_data[non_zero_mask] - sr_image[non_zero_mask]))
+    non_zero_psnr = 10 * np.log10(1.0 / non_zero_mse) if non_zero_mse > 0 else float('inf')
+    non_zero_mae = np.mean(np.abs(hr_data[non_zero_mask] - sr_image[non_zero_mask]))
+    
+    print("\n=== 非零区域分析 ===")
+    print(f"非零区域 - MSE: {non_zero_mse:.6f}, PSNR: {non_zero_psnr:.2f} dB, MAE: {non_zero_mae:.6f}")
+    print(f"非零区域像素数: {np.count_nonzero(non_zero_mask)} ({np.count_nonzero(non_zero_mask)/total_pixels*100:.2f}%)")
+
 # === 保存统计结果为CSV ===
 stats_df = pd.DataFrame({
     '指标': ['最小值', '最大值', '均值', 'MSE', 'PSNR', 'MAE'],
@@ -106,12 +215,14 @@ diff_flat = diff.flatten()
 # 创建位置索引
 positions = [f"({i//hr_data.shape[1]},{i%hr_data.shape[1]})" for i in range(len(hr_flat))]
 
-# 创建数据框
+# 是否添加零值标记
+zero_mask_flat = zero_mask.flatten()
 data_df = pd.DataFrame({
     '位置': positions,
     'HR': hr_flat,
     'SR': sr_flat,
-    '差异': diff_flat
+    '差异': diff_flat,
+    '是零值区域': zero_mask_flat
 })
 
 # 保存为CSV
@@ -136,12 +247,12 @@ plt.colorbar()
 plt.axis('off')
 
 plt.subplot(2, 3, 3)
-plt.title("SR output")
+plt.title(f"SR output ({upsampler})")
 plt.imshow(sr_image, cmap='viridis')
 plt.colorbar()
 plt.axis('off')
 
-# 添加差异图及直方图
+# 添加差异图及零值掩码
 plt.subplot(2, 3, 4)
 plt.title("Difference (HR - SR)")
 diff_plot = plt.imshow(diff, cmap='coolwarm')
@@ -149,9 +260,10 @@ plt.colorbar(diff_plot)
 plt.axis('off')
 
 plt.subplot(2, 3, 5)
-plt.title("HR 直方图")
-plt.hist(hr_data.flatten(), bins=50, alpha=0.7)
-plt.grid(True)
+plt.title("零值区域掩码")
+plt.imshow(zero_mask, cmap='gray')
+plt.colorbar()
+plt.axis('off')
 
 plt.subplot(2, 3, 6)
 plt.title("SR 直方图")

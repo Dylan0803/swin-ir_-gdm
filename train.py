@@ -12,7 +12,6 @@ import pandas as pd
 from datasets.h5_dataset import ConcDatasetTorch, generate_train_valid_dataset
 from models.network_swinir import SwinIR
 from utils import plot_loss_lines, save_args
-from weighted_mse import WeightedMSELoss
 
 
 
@@ -89,11 +88,62 @@ def valid_one_epoch(model, dataloader, criterion, device):
     return epoch_loss / len(dataloader)  # 返回平均验证损失
 
 
+# 根据上采样器类型配置模型参数
+def get_model_config(args):
+    # 基础配置
+    config = {
+        'upscale': args.scale,
+        'in_chans': 1,
+        'img_size': args.patch_size,
+        'window_size': 4 if args.patch_size <= 16 else 8,
+        'img_range': 1.,
+        'resi_connection': '1conv',
+        'upsampler': args.upsampler
+    }
+    
+    # 根据上采样器类型进行特定配置
+    if args.upsampler == 'pixelshuffle':
+        # pixelshuffle模式 - 使用更强大的架构
+        config.update({
+            'depths': [8, 8, 8, 8],
+            'embed_dim': 96,
+            'num_heads': [8, 8, 8, 8],
+            'mlp_ratio': 4
+        })
+    elif args.upsampler == 'pixelshuffledirect':
+        # pixelshuffledirect模式 - 轻量级架构
+        config.update({
+            'depths': [6, 6, 6, 6],
+            'embed_dim': 60,
+            'num_heads': [6, 6, 6, 6],
+            'mlp_ratio': 2
+        })
+    elif args.upsampler == 'nearest+conv':
+        # nearest+conv模式 - 中等架构，较好的零值区域处理
+        config.update({
+            'depths': [6, 6, 6, 6],
+            'embed_dim': 80,
+            'num_heads': [8, 8, 8, 8],
+            'mlp_ratio': 3
+        })
+    else:
+        # 默认配置
+        config.update({
+            'depths': [6, 6, 6, 6],
+            'embed_dim': 60,
+            'num_heads': [6, 6, 6, 6],
+            'mlp_ratio': 2
+        })
+    
+    return config
+
+
 # 主训练流程
 def train(args):
     logging.basicConfig(level=logging.INFO)
     print(f"Starting training with arguments: {args}")
-    print(f"Using weighted MSE loss - Alpha: {args.alpha}, Beta: {args.beta}, Threshold: {args.threshold}")
+    print(f"Using standard MSE loss")
+    print(f"Upsampler mode: {args.upsampler}")
 
     # CUDA设置和内存管理
     torch.cuda.empty_cache()  # 清空GPU缓存
@@ -127,26 +177,18 @@ def train(args):
     print(f"Data range - LR: [{sample_lr.min():.4f}, {sample_lr.max():.4f}]")
     print(f"Data range - HR: [{sample_hr.min():.4f}, {sample_hr.max():.4f}]")
 
+    # 获取模型配置
+    model_config = get_model_config(args)
+    print(f"Model configuration: {model_config}")
+    
     # 初始化 SwinIR 模型
-    model = SwinIR(
-        upscale=args.scale,
-        in_chans=1,  # 设置为1通道
-        img_size=16,  # LR图像尺寸
-        window_size=4,  # 更小的窗口大小，更适合16x16的输入
-        img_range=1.,
-        depths=[6, 6, 6, 6],  # 减少层数
-        embed_dim=60,  # 减少嵌入维度
-        num_heads=[6, 6, 6, 6],  # 匹配depths
-        mlp_ratio=2,
-        upsampler='pixelshuffledirect',  # 使用直接像素重排上采样
-        resi_connection='1conv'
-    ).to(device)
+    model = SwinIR(**model_config).to(device)
 
     print(f"Model created with upscale factor: {args.scale}")
-    print(f"Using window_size=4 for 16x16 input images")
+    print(f"Using window_size={model_config['window_size']} for {args.patch_size}x{args.patch_size} input images")
 
     # 定义损失函数和优化器
-    criterion = WeightedMSELoss(alpha=args.alpha, beta=args.beta, threshold=args.threshold)
+    criterion = nn.MSELoss()  # 使用标准MSE损失函数
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # 创建实验保存路径
@@ -188,7 +230,7 @@ def train(args):
         print(
             f"[{epoch+1}/{args.epochs}] Train Loss: {train_loss:.4f} | Valid Loss: {valid_loss:.4f}")
 
-        # ✅ 每个 epoch 结束后，打印当前时间
+        #  每个 epoch 结束后，打印当前时间
         print(
             f"Epoch {epoch+1} finished at {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -198,7 +240,7 @@ def train(args):
             model_path = os.path.join(save_dir, "best_model.pth")
             torch.save(model.state_dict(), model_path)
             print(
-                f"✅ Best model saved at epoch {epoch+1} with valid loss {best_loss:.4f}")
+                f" Best model saved at epoch {epoch+1} with valid loss {best_loss:.4f}")
         
         # 保存checkpoint
         checkpoint = {
@@ -208,7 +250,8 @@ def train(args):
             'train_losses': train_losses,
             'valid_losses': valid_losses,
             'best_loss': best_loss,
-            'args': args
+            'args': args,
+            'model_config': model_config  # 保存模型配置
         }
         torch.save(checkpoint, os.path.join(save_dir, "latest_checkpoint.pth"))
         
@@ -216,7 +259,7 @@ def train(args):
         if (epoch + 1) % 10 == 0:
             history_checkpoint_path = os.path.join(save_dir, f"checkpoint_epoch_{epoch+1}.pth")
             torch.save(checkpoint, history_checkpoint_path)
-            print(f"✅ Checkpoint saved at epoch {epoch+1}")
+            print(f" Checkpoint saved at epoch {epoch+1}")
 
         # 保存训练曲线
         plot_loss_lines(args, train_losses, valid_losses)
@@ -232,7 +275,8 @@ def train(args):
     print("Training completed!")
     print(f"Best validation loss: {best_loss:.4f}")
     print(f"Model and checkpoints saved in {save_dir}")
-    print(f"Loss function parameters - Alpha: {args.alpha}, Beta: {args.beta}, Threshold: {args.threshold}")
+    print(f"Using standard MSE loss")
+    print(f"Upsampler mode: {args.upsampler}")
     
     return model, train_losses, valid_losses, best_loss
 
@@ -253,9 +297,9 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=0.0001, help='learning rate, reduced to improve stability')
     parser.add_argument('--scale', type=int, default=6, help='放大倍数')
     parser.add_argument('--patch_size', type=int, default=16, help='LR图像的patch大小')
-    parser.add_argument('--alpha', type=float, default=1.0, help='高浓度区域损失权重')
-    parser.add_argument('--beta', type=float, default=0.3, help='背景区域损失权重')
-    parser.add_argument('--threshold', type=float, default=0.05, help='区分背景和有浓度区域的阈值')
+    parser.add_argument('--upsampler', type=str, default='pixelshuffle', 
+                        choices=['pixelshuffle', 'pixelshuffledirect', 'nearest+conv'], 
+                        help='上采样方法: pixelshuffle, pixelshuffledirect, nearest+conv')
     args = parser.parse_args()
 
     args.output_dir = os.path.join(
