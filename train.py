@@ -7,6 +7,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import pandas as pd
+import shutil
 
 # 使用自定义数据集类
 from datasets.h5_dataset import ConcDatasetTorch, generate_train_valid_dataset
@@ -80,7 +81,10 @@ def valid_one_epoch(model, dataloader, criterion, device):
         if len(hr.shape) == 3:
             hr = hr.unsqueeze(0)  # 添加batch维度
 
-        lr, hr = lr.to(device), hr.to(device)
+        # 确保正确地将两个张量都移到同一设备上
+        lr = lr.to(device)
+        hr = hr.to(device)
+        
         sr = model(lr)
         loss = criterion(sr, hr)
         epoch_loss += loss.item()
@@ -191,13 +195,19 @@ def train(args):
     criterion = nn.MSELoss()  # 使用标准MSE损失函数
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    # 创建实验保存路径
+    # 创建新的保存路径结构
     timestamp = time.strftime("%Y%m%d-%H%M%S")  # 当前时间戳
-    save_dir = os.path.join("experiments", f"{args.exp_name}_{timestamp}")
-    os.makedirs(save_dir, exist_ok=True)
+    experiment_dir = os.path.join("experiments", f"{args.exp_name}_{timestamp}")
+    model_dir = os.path.join(experiment_dir, args.model_name)
+    
+    # 创建保存目录结构
+    os.makedirs(experiment_dir, exist_ok=True)
+    os.makedirs(model_dir, exist_ok=True)
+    
+    print(f"保存路径: {model_dir}")
 
     # 保存训练参数
-    save_args(args, save_dir)
+    save_args(args, model_dir)
 
     # 初始化最佳验证损失和训练历史
     best_loss = float('inf')
@@ -206,7 +216,7 @@ def train(args):
     start_epoch = 0
 
     # 检查是否有checkpoint可以恢复
-    checkpoint_path = os.path.join(save_dir, "latest_checkpoint.pth")
+    checkpoint_path = os.path.join(model_dir, "latest_checkpoint.pth")
     if os.path.exists(checkpoint_path):
         print(f"Loading checkpoint from {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path)
@@ -237,7 +247,7 @@ def train(args):
         # 保存最佳模型（验证损失最低）
         if valid_loss < best_loss:
             best_loss = valid_loss
-            model_path = os.path.join(save_dir, "best_model.pth")
+            model_path = os.path.join(model_dir, "best_model.pth")
             torch.save(model.state_dict(), model_path)
             print(
                 f" Best model saved at epoch {epoch+1} with valid loss {best_loss:.4f}")
@@ -253,16 +263,16 @@ def train(args):
             'args': args,
             'model_config': model_config  # 保存模型配置
         }
-        torch.save(checkpoint, os.path.join(save_dir, "latest_checkpoint.pth"))
+        torch.save(checkpoint, os.path.join(model_dir, "latest_checkpoint.pth"))
         
         # 每10个epoch保存一次历史checkpoint
         if (epoch + 1) % 10 == 0:
-            history_checkpoint_path = os.path.join(save_dir, f"checkpoint_epoch_{epoch+1}.pth")
+            history_checkpoint_path = os.path.join(model_dir, f"checkpoint_epoch_{epoch+1}.pth")
             torch.save(checkpoint, history_checkpoint_path)
             print(f" Checkpoint saved at epoch {epoch+1}")
 
         # 保存训练曲线
-        plot_loss_lines(args, train_losses, valid_losses)
+        plot_loss_lines(args, train_losses, valid_losses, save_dir=model_dir)
         
         # 保存训练历史到CSV
         history_df = pd.DataFrame({
@@ -270,11 +280,17 @@ def train(args):
             'train_loss': train_losses,
             'valid_loss': valid_losses
         })
-        history_df.to_csv(os.path.join(save_dir, 'training_history.csv'), index=False)
+        history_df.to_csv(os.path.join(model_dir, 'training_history.csv'), index=False)
+    
+    # 训练完成后，同时在顶级实验目录保存一份最佳模型的副本，便于查找
+    best_model_path = os.path.join(model_dir, "best_model.pth")
+    if os.path.exists(best_model_path):
+        shutil.copy2(best_model_path, os.path.join(experiment_dir, f"{args.model_name}_best_model.pth"))
+        print(f"最佳模型副本已保存至: {os.path.join(experiment_dir, f'{args.model_name}_best_model.pth')}")
 
     print("Training completed!")
     print(f"Best validation loss: {best_loss:.4f}")
-    print(f"Model and checkpoints saved in {save_dir}")
+    print(f"Model and checkpoints saved in {model_dir}")
     print(f"Using standard MSE loss")
     print(f"Upsampler mode: {args.upsampler}")
     
@@ -302,6 +318,7 @@ if __name__ == "__main__":
                         help='上采样方法: pixelshuffle, pixelshuffledirect, nearest+conv')
     args = parser.parse_args()
 
+    # 这个输出目录设置不再使用，但保留兼容性
     args.output_dir = os.path.join(
         './experiments', args.model_name, args.exp_name)
 
