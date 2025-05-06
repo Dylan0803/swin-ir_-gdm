@@ -155,6 +155,10 @@ with torch.no_grad():
     sr_tensor = model(lr_tensor)  # shape: [1,1,a,a]
     sr_image = sr_tensor.squeeze().cpu().numpy()  # shape: [a, a]
 
+# === 在这里添加后处理代码 ===
+# 设置下限为0
+sr_image = np.maximum(sr_image, 0)  # 小于0的值会被设置为0
+
 # === 分析SR和HR数据 ===
 # 计算差异
 diff = hr_data - sr_image
