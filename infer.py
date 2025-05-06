@@ -8,8 +8,6 @@ import pandas as pd
 import os
 
 # === 命令行参数设置 ===
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="SwinIR Inference")
     parser.add_argument('--model_path', type=str,
@@ -30,19 +28,18 @@ def parse_args():
                        help='LR图像的patch大小')
     return parser.parse_args()
 
-
 # === 加载命令行参数 ===
 args = parse_args()
 
 # === 参数设置 ===
-model_path = args.model_path  # 模型路径
-data_path = args.data_path  # h5 文件路径
-sample_index = args.sample_index  # 测试第几个样本（比如0）
-scale = args.scale  # 放大倍数，和训练时一致
-device = torch.device(args.device)  # 使用指定的设备
-output_dir = args.output_dir  # 输出目录
-upsampler = args.upsampler  # 上采样方法
-patch_size = args.patch_size  # LR图像尺寸
+model_path = args.model_path
+data_path = args.data_path
+sample_index = args.sample_index
+scale = args.scale
+device = torch.device(args.device)
+output_dir = args.output_dir
+upsampler = args.upsampler
+patch_size = args.patch_size
 
 # 确保输出目录存在
 os.makedirs(output_dir, exist_ok=True)
@@ -215,14 +212,12 @@ diff_flat = diff.flatten()
 # 创建位置索引
 positions = [f"({i//hr_data.shape[1]},{i%hr_data.shape[1]})" for i in range(len(hr_flat))]
 
-# 是否添加零值标记
-zero_mask_flat = zero_mask.flatten()
+# 创建数据DataFrame
 data_df = pd.DataFrame({
     '位置': positions,
     'HR': hr_flat,
     'SR': sr_flat,
-    '差异': diff_flat,
-    '是零值区域': zero_mask_flat
+    '差异': diff_flat
 })
 
 # 保存为CSV
@@ -231,44 +226,33 @@ data_df.to_csv(data_file, index=False, encoding='utf-8-sig')
 print(f"像素数据已保存到 {data_file}")
 
 # === 可视化对比并保存 ===
-plt.figure(figsize=(15, 12))
+plt.figure(figsize=(20, 5))  # 调整图像大小以适应横向布局
 
 # 原始图像对比
-plt.subplot(2, 3, 1)
+plt.subplot(1, 4, 1)
 plt.title("Ground Truth HR")
 plt.imshow(hr_data, cmap='viridis')
 plt.colorbar()
 plt.axis('off')
 
-plt.subplot(2, 3, 2)
+plt.subplot(1, 4, 2)
 plt.title("LR input")
 plt.imshow(lr_data, cmap='viridis')
 plt.colorbar()
 plt.axis('off')
 
-plt.subplot(2, 3, 3)
+plt.subplot(1, 4, 3)
 plt.title(f"SR output ({upsampler})")
 plt.imshow(sr_image, cmap='viridis')
 plt.colorbar()
 plt.axis('off')
 
-# 添加差异图及零值掩码
-plt.subplot(2, 3, 4)
+# 添加差异图
+plt.subplot(1, 4, 4)
 plt.title("Difference (HR - SR)")
 diff_plot = plt.imshow(diff, cmap='coolwarm')
 plt.colorbar(diff_plot)
 plt.axis('off')
-
-plt.subplot(2, 3, 5)
-plt.title("零值区域掩码")
-plt.imshow(zero_mask, cmap='gray')
-plt.colorbar()
-plt.axis('off')
-
-plt.subplot(2, 3, 6)
-plt.title("SR 直方图")
-plt.hist(sr_image.flatten(), bins=50, alpha=0.7)
-plt.grid(True)
 
 # 保存为图像文件，而不是直接展示
 plt.tight_layout()
