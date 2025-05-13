@@ -17,7 +17,7 @@ def visualize_concentration_and_wind(h5_path):
         
         # 获取第一个数据集的形状
         first_data = f[wind_groups[0]][source_groups[0]]['HR_1'][:]
-        num_iterations = len(f[wind_groups[0]][source_groups[0]].keys()) - (1 if 'source_position' in f[wind_groups[0]][source_groups[0]] else 0)
+        num_iterations = len(f[wind_groups[0]][source_groups[0]].keys()) - (1 if 'source_info' in f[wind_groups[0]][source_groups[0]] else 0)
         
         # 创建图形和子图
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
@@ -66,13 +66,22 @@ def visualize_concentration_and_wind(h5_path):
                 im1.set_clim(vmin=data.min(), vmax=data.max())
                 ax1.set_title(f'Concentration - Wind {wind_idx}, Source {source_idx}, Iteration {iter_idx}')
                 
-                # 清除之前画的源位置点
-                for line in ax1.lines:
-                    line.remove()
+                # 清除之前的所有标记和文本
+                for artist in ax1.lines + ax1.texts:
+                    artist.remove()
+                ax1.legend_.remove() if ax1.legend_ else None
                 
-                if 'source_position' in source_group:
-                    source_pos = source_group['source_position'][:]
-                    ax1.plot(source_pos[0], source_pos[1], 'r*', markersize=10, label='Source')
+                if 'source_info' in source_group:
+                    source_info = source_group['source_info'][:]
+                    # 只使用前两个数据（位置信息）
+                    source_pos = source_info[:2]
+                    # 绘制泄漏源位置，使用红星标记
+                    ax1.plot(source_pos[0], source_pos[1], 'r*', markersize=5, label='Source')
+                    # 添加坐标信息，位置调整到右上角
+                    ax1.text(source_pos[0]+5, source_pos[1]+5, 
+                            f'({source_pos[0]/10:.1f}, {source_pos[1]/10:.1f})',
+                            color='white', fontsize=6, 
+                            bbox=dict(facecolor='black', alpha=0.5))
                     ax1.legend()
                 
                 # 更新风场数据
@@ -140,8 +149,10 @@ def display_dataset_info(h5_path):
                 print(f"  源位置 {source_idx}:")
                 num_keys = [k for k in source_group.keys() if k.startswith('HR_')]
                 print(f"    数据集数量: {len(num_keys)}")
-                if 'source_position' in source_group:
-                    print(f"    源位置信息: {source_group['source_position'][:]}")
+                if 'source_info' in source_group:
+                    info = source_group['source_info'][:]
+                    print(f"    源位置信息: ({info[0]/10:.1f}, {info[1]/10:.1f})")
+                    print(f"    源浓度信息: {info[2]:.1f} ppm")
                 print(f"    数据形状: {source_group['HR_1'].shape}")
                 print(f"    数值范围: [{source_group['HR_1'][:].min():.4f}, {source_group['HR_1'][:].max():.4f}]")
 
