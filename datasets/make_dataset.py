@@ -155,6 +155,9 @@ def txt_to_h5(data_root, output_path):
                         os.path.join(source_dir, conc_file)
                     )
                     
+                    # 剪切数据到96x96
+                    conc_data = conc_data[2:98, 2:98]  # 从中心剪切出96x96的数据
+                    
                     # 存储到h5文件
                     dataset = source_group.create_dataset(
                         f'HR_{i+1}', 
@@ -171,6 +174,9 @@ def txt_to_h5(data_root, output_path):
                 if source_key in source_positions:
                     # 获取源位置
                     source_pos = source_positions[source_key]
+                    # 调整源位置坐标（减去偏移量）
+                    source_pos[0] = max(0, source_pos[0] - 2)  # 确保不会出现负值
+                    source_pos[1] = max(0, source_pos[1] - 2)  # 确保不会出现负值
                     # 获取数据高度
                     height = source_group['HR_1'].shape[0]
                     # 垂直翻转y坐标
