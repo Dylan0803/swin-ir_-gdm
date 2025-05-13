@@ -1,107 +1,7 @@
 import h5py
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, Button
 import os
 from tqdm.auto import tqdm
-
-def visualize_concentration(h5_path):
-    """
-    可视化h5文件中的浓度数据
-    
-    Args:
-        h5_path: h5文件路径
-    """
-    with h5py.File(h5_path, 'r') as f:
-        # 获取所有风场和源位置
-        wind_groups = list(f.keys())
-        source_groups = list(f[wind_groups[0]].keys())
-        
-        # 获取第一个数据集的形状
-        first_data = f[wind_groups[0]][source_groups[0]]['HR_1']
-        num_iterations = len(f[wind_groups[0]][source_groups[0]].keys()) - 1  # 减去source_position
-        
-        # 创建图形和子图
-        fig, ax = plt.subplots(figsize=(10, 8))
-        plt.subplots_adjust(bottom=0.3)  # 为滑块留出空间
-        
-        # 创建滑块
-        wind_ax = plt.axes([0.2, 0.2, 0.6, 0.03])
-        source_ax = plt.axes([0.2, 0.15, 0.6, 0.03])
-        iter_ax = plt.axes([0.2, 0.1, 0.6, 0.03])
-        
-        wind_slider = Slider(wind_ax, 'Wind', 1, len(wind_groups), valinit=1, valstep=1)
-        source_slider = Slider(source_ax, 'Source', 1, len(source_groups), valinit=1, valstep=1)
-        iter_slider = Slider(iter_ax, 'Iteration', 1, num_iterations, valinit=1, valstep=1)
-        
-        # 创建颜色条
-        im = ax.imshow(np.zeros(first_data.shape), cmap='viridis')
-        plt.colorbar(im, ax=ax, label='Concentration')
-        
-        def update(val):
-            # 获取当前选择
-            wind_idx = int(wind_slider.val)
-            source_idx = int(source_slider.val)
-            iter_idx = int(iter_slider.val)
-            
-            # 读取数据
-            wind_group = f[f'wind{wind_idx}']
-            source_group = wind_group[f's{source_idx}']
-            data = source_group[f'HR_{iter_idx}'][:]
-            
-            # 更新图像
-            im.set_data(data)
-            im.set_clim(vmin=data.min(), vmax=data.max())
-            
-            # 更新标题
-            ax.set_title(f'Wind {wind_idx}, Source {source_idx}, Iteration {iter_idx}')
-            
-            # 如果有源位置信息，显示源位置
-            if 'source_position' in source_group:
-                source_pos = source_group['source_position'][:]
-                ax.plot(source_pos[0], source_pos[1], 'r*', markersize=10, label='Source')
-                ax.legend()
-            
-            fig.canvas.draw_idle()
-        
-        # 注册更新函数
-        wind_slider.on_changed(update)
-        source_slider.on_changed(update)
-        iter_slider.on_changed(update)
-        
-        # 添加重置按钮
-        reset_ax = plt.axes([0.8, 0.025, 0.1, 0.04])
-        reset_button = Button(reset_ax, 'Reset', color='lightgoldenrodyellow', hovercolor='0.975')
-        
-        def reset(event):
-            wind_slider.reset()
-            source_slider.reset()
-            iter_slider.reset()
-        
-        reset_button.on_clicked(reset)
-        
-        # 显示第一个数据
-        update(1)
-        
-        plt.show()
-
-def display_dataset_info(h5_path):
-    """
-    显示数据集的基本信息
-    """
-    with h5py.File(h5_path, 'r') as f:
-        print("\n数据集信息:")
-        for wind_idx in range(1, 4):
-            wind_group = f[f'wind{wind_idx}']
-            print(f"\n风场 {wind_idx}:")
-            for source_idx in range(1, 9):
-                source_group = wind_group[f's{source_idx}']
-                print(f"  源位置 {source_idx}:")
-                print(f"    数据集数量: {len(source_group.keys()) - 1}")  # 减去source_position
-                if 'source_position' in source_group:
-                    print(f"    源位置信息: {source_group['source_position'][:]}")
-                print(f"    数据形状: {source_group['HR_1'].shape}")
-                print(f"    数值范围: [{source_group['HR_1'][:].min():.4f}, {source_group['HR_1'][:].max():.4f}]")
 
 def read_wind_data(wind_file):
     """
@@ -169,6 +69,37 @@ def read_concentration_file(file_path):
     
     return metadata, conc_data
 
+def get_source_positions():
+    """
+    获取所有泄漏源位置信息
+    
+    Returns:
+        source_positions: 包含所有泄漏源位置信息的字典
+    """
+    source_positions = {}
+    source_file = 'C:\\Users\\yy143\\Desktop\\dataset\\data\\source.txt'
+    
+    with open(source_file, 'r') as f:
+        for line in f:
+            if line.strip():
+                # 解析行数据
+                parts = line.strip().split('-------')
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    coords = parts[1].strip().split()
+                    
+                    # 提取x和y坐标
+                    x = float(coords[0].split(':')[1])
+                    y = float(coords[1].split(':')[1])
+                    
+                    # 转换坐标（乘以10并取整）
+                    x = int(x * 10)
+                    y = int(y * 10)
+                    
+                    source_positions[key] = np.array([x, y])
+    
+    return source_positions
+
 def txt_to_h5(data_root, output_path):
     """
     将txt浓度数据转换为h5文件
@@ -177,6 +108,9 @@ def txt_to_h5(data_root, output_path):
         data_root: 原始数据根目录，包含w1s1-w1s8等文件夹
         output_path: 输出h5文件路径
     """
+    # 获取泄漏源位置信息
+    source_positions = get_source_positions()
+    
     # 创建h5文件
     with h5py.File(output_path, 'w') as f:
         # 首先处理风场数据
@@ -232,10 +166,16 @@ def txt_to_h5(data_root, output_path):
                     for key, value in metadata.items():
                         dataset.attrs[key] = value
                 
-                # 存储源位置信息（如果需要）
-                source_pos_file = os.path.join(source_dir, 'source_position.txt')
-                if os.path.exists(source_pos_file):
-                    source_pos = np.loadtxt(source_pos_file)
+                # 存储源位置信息
+                source_key = f'w{wind_idx}s{source_idx}'
+                if source_key in source_positions:
+                    # 获取源位置
+                    source_pos = source_positions[source_key]
+                    # 获取数据高度
+                    height = source_group['HR_1'].shape[0]
+                    # 垂直翻转y坐标
+                    source_pos[1] = height - 1 - source_pos[1]
+                    # 存储翻转后的源位置
                     source_group.create_dataset('source_position', data=source_pos)
 
 def main():
@@ -248,26 +188,6 @@ def main():
     
     # 转换数据
     txt_to_h5(data_root, output_path)
-    
-    # 验证数据
-    with h5py.File(output_path, 'r') as f:
-        print("\n数据验证:")
-        for wind_idx in range(1, 4):
-            wind_group = f[f'wind{wind_idx}']
-            print(f"\n风场 {wind_idx}:")
-            # 打印风场数据信息
-            print(f"  风场数据:")
-            print(f"    位置点数量: {len(wind_group['points'])}")
-            print(f"    速度矢量数量: {len(wind_group['velocity'])}")
-            
-            for source_idx in range(1, 9):
-                source_group = wind_group[f's{source_idx}']
-                print(f"  源位置 {source_idx}:")
-                print(f"    数据集数量: {len(source_group.keys())}")
-                if 'source_position' in source_group:
-                    print(f"    源位置信息: {source_group['source_position'][:]}")
-                print(f"    第一个数据集形状: {source_group['HR_1'].shape}")
-                print(f"    第一个数据集元数据: {dict(source_group['HR_1'].attrs)}")
 
 if __name__ == '__main__':
     main()
