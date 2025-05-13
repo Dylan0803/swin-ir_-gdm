@@ -175,8 +175,10 @@ def txt_to_h5(data_root, output_path):
                     height = source_group['HR_1'].shape[0]
                     # 垂直翻转y坐标
                     source_pos[1] = height - 1 - source_pos[1]
-                    # 存储翻转后的源位置
-                    source_group.create_dataset('source_position', data=source_pos)
+                    # 创建源信息数组，包含位置和浓度信息
+                    source_info = np.array([source_pos[0], source_pos[1], 10.0])  # 10.0代表10ppm
+                    # 存储源信息
+                    source_group.create_dataset('source_info', data=source_info)
 
 def main():
     # 设置路径
