@@ -1,3 +1,6 @@
+"""
+最开始进行超分辨率所用的数据集增强程序
+"""
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
@@ -61,8 +64,8 @@ def display_dataset_info(file_path):
         print(f"LR数值范围: [{f['LR'][:].min():.4f}, {f['LR'][:].max():.4f}]")
 
 if __name__ == '__main__':
-    original_path = 'C:\\Users\\yy143\\Desktop\\dataset\\dataset_HRLR.h5'
-    augmented_path = 'C:\\Users\\yy143\\Desktop\\dataset\\dataset_HRLR_augmented.h5'
+    original_path = 'C:\\Users\\yy143\\Desktop\\dataset\\old_dataset\\dataset_HRLR.h5'
+    augmented_path = 'C:\\Users\\yy143\\Desktop\\dataset\\old_dataset\\dataset_HRLR_augmented.h5'
     
     # 显示数据集信息
     print("原始数据集:")
