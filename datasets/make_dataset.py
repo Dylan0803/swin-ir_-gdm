@@ -1,7 +1,11 @@
+"""
+用来将txt浓度数据转换为h5文件，同时按照不同的条件进行划分，加上泄漏源浓度位置以及风场等信息，并针对HR进行下采样
+"""
 import h5py
 import numpy as np
 import os
 from tqdm.auto import tqdm
+from scipy.ndimage import zoom  # 添加这个导入
 
 def read_wind_data(wind_file):
     """
@@ -102,7 +106,7 @@ def get_source_positions():
 
 def txt_to_h5(data_root, output_path):
     """
-    将txt浓度数据转换为h5文件
+    将txt浓度数据转换为h5文件，并进行下采样
     
     Args:
         data_root: 原始数据根目录，包含w1s1-w1s8等文件夹
@@ -158,16 +162,28 @@ def txt_to_h5(data_root, output_path):
                     # 剪切数据到96x96
                     conc_data = conc_data[2:98, 2:98]  # 从中心剪切出96x96的数据
                     
-                    # 存储到h5文件
+                    # 存储高分辨率数据
                     dataset = source_group.create_dataset(
                         f'HR_{i+1}', 
                         data=conc_data,
                         compression='gzip'  # 使用gzip压缩
                     )
                     
+                    # 下采样到16x16
+                    scale_factor = 16 / 96  # 计算缩放因子
+                    lr_data = zoom(conc_data, scale_factor, order=1)  # 使用线性插值
+                    
+                    # 存储低分辨率数据
+                    lr_dataset = source_group.create_dataset(
+                        f'LR_{i+1}',
+                        data=lr_data,
+                        compression='gzip'
+                    )
+                    
                     # 存储元数据
                     for key, value in metadata.items():
                         dataset.attrs[key] = value
+                        lr_dataset.attrs[key] = value
                 
                 # 存储源位置信息
                 source_key = f'w{wind_idx}s{source_idx}'
@@ -186,16 +202,160 @@ def txt_to_h5(data_root, output_path):
                     # 存储源信息
                     source_group.create_dataset('source_info', data=source_info)
 
+def augment_dataset(h5_path, output_path):
+    """
+    Augment the dataset with 5 types of transformations:
+    - Counter-clockwise rotation 90°
+    - Counter-clockwise rotation 180°
+    - Counter-clockwise rotation 270°
+    - Vertical flip
+    - Horizontal flip
+    
+    Args:
+        h5_path: path to the original h5 file
+        output_path: path to the augmented h5 file
+    """
+    with h5py.File(h5_path, 'r') as f_in, h5py.File(output_path, 'w') as f_out:
+        # Process each wind field case
+        for wind_idx in range(1, 4):
+            wind_group = f_in[f'wind{wind_idx}']
+            
+            # Create original data group (with _0 suffix)
+            wind_out_group = f_out.create_group(f'wind{wind_idx}_0')
+            wind_out_group.create_dataset('points', data=wind_group['points'][:])
+            wind_out_group.create_dataset('velocity', data=wind_group['velocity'][:])
+            
+            # Process each source position
+            for source_idx in range(1, 9):
+                source_group = wind_group[f's{source_idx}']
+                source_out_group = wind_out_group.create_group(f's{source_idx}')
+                
+                # Copy original data
+                for i in range(1, len([k for k in source_group.keys() if k.startswith('HR_')]) + 1):
+                    source_out_group.create_dataset(f'HR_{i}', data=source_group[f'HR_{i}'][:], compression='gzip')
+                    source_out_group.create_dataset(f'LR_{i}', data=source_group[f'LR_{i}'][:], compression='gzip')
+                    # Copy metadata
+                    for key, value in source_group[f'HR_{i}'].attrs.items():
+                        source_out_group[f'HR_{i}'].attrs[key] = value
+                        source_out_group[f'LR_{i}'].attrs[key] = value
+                
+                # Copy source position information
+                source_out_group.create_dataset('source_info', data=source_group['source_info'][:])
+            
+            # Define augmentation operations
+            augmentations = {
+                'rot90': lambda x: np.rot90(x, k=1),  # Counter-clockwise 90°
+                'rot180': lambda x: np.rot90(x, k=2),  # Counter-clockwise 180°
+                'rot270': lambda x: np.rot90(x, k=3),  # Counter-clockwise 270°
+                'flip_v': lambda x: np.flipud(x),      # Vertical flip
+                'flip_h': lambda x: np.fliplr(x)       # Horizontal flip
+            }
+            
+            # Process each augmentation operation
+            for aug_name, aug_func in augmentations.items():
+                # Create augmented wind field group
+                wind_aug_group = f_out.create_group(f'wind{wind_idx}_{aug_name}')
+                
+                # Process wind field data
+                points = wind_group['points'][:]
+                velocity = wind_group['velocity'][:]
+                
+                # Process wind field data based on augmentation type
+                if 'rot' in aug_name:
+                    # Rotation operations
+                    center = np.array([48, 48])
+                    relative_points = points - center
+                    if aug_name == 'rot90':
+                        # Counter-clockwise 90° rotation
+                        rotation_matrix = np.array([[0, -1], [1, 0]])
+                        velocity = np.dot(velocity, rotation_matrix.T)
+                    elif aug_name == 'rot180':
+                        # Counter-clockwise 180° rotation
+                        rotation_matrix = np.array([[-1, 0], [0, -1]])
+                        velocity = np.dot(velocity, rotation_matrix.T)
+                    else:  # rot270
+                        # Counter-clockwise 270° rotation
+                        rotation_matrix = np.array([[0, 1], [-1, 0]])
+                        velocity = np.dot(velocity, rotation_matrix.T)
+                    
+                    # Rotate points
+                    relative_points = np.dot(relative_points, rotation_matrix.T)
+                    points = relative_points + center
+                else:
+                    # Flip operations
+                    if aug_name == 'flip_v':
+                        points[:, 1] = 96 - points[:, 1]
+                        velocity[:, 1] = -velocity[:, 1]
+                    else:  # flip_h
+                        points[:, 0] = 96 - points[:, 0]
+                        velocity[:, 0] = -velocity[:, 0]
+                
+                wind_aug_group.create_dataset('points', data=points)
+                wind_aug_group.create_dataset('velocity', data=velocity)
+                
+                # Process each source position
+                for source_idx in range(1, 9):
+                    source_group = wind_group[f's{source_idx}']
+                    source_aug_group = wind_aug_group.create_group(f's{source_idx}')
+                    
+                    # Process each time step
+                    for i in range(1, len([k for k in source_group.keys() if k.startswith('HR_')]) + 1):
+                        # Augment concentration data
+                        hr_data = aug_func(source_group[f'HR_{i}'][:])
+                        lr_data = aug_func(source_group[f'LR_{i}'][:])
+                        
+                        source_aug_group.create_dataset(f'HR_{i}', data=hr_data, compression='gzip')
+                        source_aug_group.create_dataset(f'LR_{i}', data=lr_data, compression='gzip')
+                        
+                        # Copy metadata
+                        for key, value in source_group[f'HR_{i}'].attrs.items():
+                            source_aug_group[f'HR_{i}'].attrs[key] = value
+                            source_aug_group[f'LR_{i}'].attrs[key] = value
+                    
+                    # Process source position information
+                    # 获取源位置
+                    source_info = source_group['source_info'][:]
+                    x, y, conc = source_info
+                    if aug_name == 'rot90':
+                        # 逆时针90度旋转：x, y → y, 95 - x
+                        x_new = y
+                        y_new = 95 - x
+                    elif aug_name == 'rot180':
+                        # 逆时针180度旋转：x, y → 95 - x, 95 - y
+                        x_new = 95 - x
+                        y_new = 95 - y
+                    elif aug_name == 'rot270':
+                        # 逆时针270度旋转：x, y → 95 - y, x
+                        x_new = 95 - y
+                        y_new = x
+                    elif aug_name == 'flip_v':
+                        # 上下翻转：y → 95 - y
+                        x_new = x
+                        y_new = 95 - y
+                    elif aug_name == 'flip_h':
+                        # 左右翻转：x → 95 - x
+                        x_new = 95 - x
+                        y_new = y
+                    else:
+                        x_new = x
+                        y_new = y
+                    source_aug_group.create_dataset('source_info', data=np.array([x_new, y_new, conc]))
+
+
 def main():
     # 设置路径
     data_root = 'C:\\Users\\yy143\\Desktop\\dataset\\data'  # 原始数据根目录
     output_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\dataset.h5'  # 输出h5文件路径
+    aug_output_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\augmented_dataset.h5'  # 增强后的h5文件路径
     
     # 创建输出目录（如果不存在）
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     # 转换数据
     txt_to_h5(data_root, output_path)
+    
+    # 进行数据增强
+    augment_dataset(output_path, aug_output_path)
 
 if __name__ == '__main__':
     main()
