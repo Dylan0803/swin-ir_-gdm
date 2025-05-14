@@ -204,20 +204,13 @@ def txt_to_h5(data_root, output_path):
 
 def augment_dataset(h5_path, output_path):
     """
-    Augment the dataset with 5 types of transformations:
-    - Counter-clockwise rotation 90°
-    - Counter-clockwise rotation 180°
-    - Counter-clockwise rotation 270°
-    - Vertical flip
-    - Horizontal flip
-    
-    Args:
-        h5_path: path to the original h5 file
-        output_path: path to the augmented h5 file
+    对数据集进行增强处理，并添加调试输出
     """
+    print("\n开始数据增强处理...")
     with h5py.File(h5_path, 'r') as f_in, h5py.File(output_path, 'w') as f_out:
         # Process each wind field case
         for wind_idx in range(1, 4):
+            print(f"\n处理风场 {wind_idx}...")
             wind_group = f_in[f'wind{wind_idx}']
             
             # Create original data group (with _0 suffix)
@@ -227,6 +220,7 @@ def augment_dataset(h5_path, output_path):
             
             # Process each source position
             for source_idx in range(1, 9):
+                print(f"  处理源位置 {source_idx}...")
                 source_group = wind_group[f's{source_idx}']
                 source_out_group = wind_out_group.create_group(f's{source_idx}')
                 
@@ -253,6 +247,7 @@ def augment_dataset(h5_path, output_path):
             
             # Process each augmentation operation
             for aug_name, aug_func in augmentations.items():
+                print(f"  处理增强操作: {aug_name}...")
                 # Create augmented wind field group
                 wind_aug_group = f_out.create_group(f'wind{wind_idx}_{aug_name}')
                 
@@ -340,22 +335,90 @@ def augment_dataset(h5_path, output_path):
                         x_new = x
                         y_new = y
                     source_aug_group.create_dataset('source_info', data=np.array([x_new, y_new, conc]))
+    
+    print("\n数据增强处理完成！")
 
+def normalize_dataset(h5_path, output_path):
+    """
+    对增强后的数据集进行归一化处理，对每种情况的HR和LR对分别进行归一化
+    归一化后的数据直接以HR和LR的形式保存
+    """
+    print("\n开始归一化数据...")
+    with h5py.File(h5_path, 'r') as f_in, h5py.File(output_path, 'w') as f_out:
+        # 遍历所有风场组
+        for wind_group_name in f_in.keys():
+            print(f"\n处理风场组: {wind_group_name}...")
+            wind_group = f_in[wind_group_name]
+            wind_out_group = f_out.create_group(wind_group_name)
+            
+            # 复制风场数据（不归一化）
+            wind_out_group.create_dataset('points', data=wind_group['points'][:])
+            wind_out_group.create_dataset('velocity', data=wind_group['velocity'][:])
+            
+            # 遍历所有源位置
+            for source_idx in range(1, 9):
+                source_key = f's{source_idx}'
+                if source_key not in wind_group:
+                    continue
+                
+                print(f"  处理源位置 {source_idx}...")
+                source_group = wind_group[source_key]
+                source_out_group = wind_out_group.create_group(source_key)
+                
+                # 获取所有时间步
+                time_steps = [k for k in source_group.keys() if k.startswith('HR_')]
+                
+                # 对每个时间步的HR和LR对进行归一化
+                for time_step in time_steps:
+                    hr_key = time_step
+                    lr_key = f'LR_{time_step.split("_")[1]}'
+                    
+                    # 读取HR和LR数据
+                    hr_data = source_group[hr_key][:]
+                    lr_data = source_group[lr_key][:]
+                    
+                    # 计算该对数据的最大最小值
+                    max_val = max(hr_data.max(), lr_data.max())
+                    min_val = min(hr_data.min(), lr_data.min())
+                    
+                    # 归一化HR和LR数据
+                    normalized_hr = (hr_data - min_val) / (max_val - min_val)
+                    normalized_lr = (lr_data - min_val) / (max_val - min_val)
+                    
+                    # 存储归一化后的数据（直接以HR和LR的形式保存）
+                    source_out_group.create_dataset(hr_key, data=normalized_hr, compression='gzip')
+                    source_out_group.create_dataset(lr_key, data=normalized_lr, compression='gzip')
+                    
+                    # 复制元数据
+                    for attr_key, attr_value in source_group[hr_key].attrs.items():
+                        source_out_group[hr_key].attrs[attr_key] = attr_value
+                        source_out_group[lr_key].attrs[attr_key] = attr_value
+                
+                # 复制源位置信息（不归一化）
+                source_out_group.create_dataset('source_info', data=source_group['source_info'][:])
+        
+        print("\n归一化完成！")
 
 def main():
     # 设置路径
     data_root = 'C:\\Users\\yy143\\Desktop\\dataset\\data'  # 原始数据根目录
     output_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\dataset.h5'  # 输出h5文件路径
     aug_output_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\augmented_dataset.h5'  # 增强后的h5文件路径
+    norm_output_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\normalized_augmented_dataset.h5'  # 修改后的归一化文件名
     
     # 创建输出目录（如果不存在）
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     # 转换数据
+    print("\n开始转换数据...")
     txt_to_h5(data_root, output_path)
+    print("数据转换完成！")
     
     # 进行数据增强
     augment_dataset(output_path, aug_output_path)
+    
+    # 进行数据归一化
+    normalize_dataset(aug_output_path, norm_output_path)
 
 if __name__ == '__main__':
     main()

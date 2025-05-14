@@ -272,7 +272,7 @@ def train(args):
             print(f" Checkpoint saved at epoch {epoch+1}")
 
         # 保存训练曲线
-        plot_loss_lines(args, train_losses, valid_losses, save_dir=model_dir)
+        plot_loss_lines(args, train_losses, valid_losses)
         
         # 保存训练历史到CSV
         history_df = pd.DataFrame({
