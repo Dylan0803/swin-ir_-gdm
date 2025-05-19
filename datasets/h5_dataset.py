@@ -53,12 +53,12 @@ class MultiTaskDataset(Dataset):
 
     def __getitem__(self, idx):
         """
-        返回数据时，自动读取 LR、HR 和泄漏源位置信息
+        返回数据时，自动读取 LR、HR 和泄漏源位置信息，并进行归一化处理
         返回：
-        - lr_tensor: 低分辨率数据 [1, H, W]
-        - hr_tensor: 高分辨率数据 [1, H, W]
-        - source_pos: 泄漏源位置真值 [2] (x, y坐标)
-        - hr_max_pos: HR中浓度最高值的位置 [2] (x, y坐标)
+        - lr_tensor: 低分辨率数据 [1, H, W]，值范围[0,1]
+        - hr_tensor: 高分辨率数据 [1, H, W]，值范围[0,1]
+        - source_pos: 泄漏源位置真值 [2]，值范围[0,1]
+        - hr_max_pos: HR中浓度最高值的位置 [2]，值范围[0,1]
         """
         idx_in_file = self.index_list[idx]
         data_info = self.data_indices[idx_in_file]
@@ -76,9 +76,13 @@ class MultiTaskDataset(Dataset):
         source_pos = source_info[:2]  # 只取位置信息
         
         # 计算HR中浓度最高值的位置
-        # 注意：numpy的unravel_index返回的是(y, x)顺序，需要转换为(x, y)
         hr_max_pos = np.unravel_index(hr.argmax(), hr.shape)
         hr_max_pos = np.array([hr_max_pos[1], hr_max_pos[0]], dtype=np.float32)  # 转换为(x, y)顺序
+        
+        # 归一化坐标到[0,1]范围
+        # 注意：图像尺寸为96x96，所以除以95（因为坐标从0开始）
+        source_pos = source_pos / 95.0
+        hr_max_pos = hr_max_pos / 95.0
         
         # 增加通道维度
         if len(lr.shape) == 2:
@@ -93,10 +97,10 @@ class MultiTaskDataset(Dataset):
         hr_max_pos_tensor = torch.tensor(hr_max_pos, dtype=torch.float32)
         
         return {
-            'lr': lr_tensor,          # 输入数据
-            'hr': hr_tensor,          # 超分辨率任务的目标
-            'source_pos': source_pos_tensor,  # 泄漏源位置真值
-            'hr_max_pos': hr_max_pos_tensor  # HR中浓度最高位置，用于学习位置关系
+            'lr': lr_tensor,          # 输入数据，已归一化到[0,1]
+            'hr': hr_tensor,          # 超分辨率任务的目标，已归一化到[0,1]
+            'source_pos': source_pos_tensor,  # 泄漏源位置真值，已归一化到[0,1]
+            'hr_max_pos': hr_max_pos_tensor  # HR中浓度最高位置，已归一化到[0,1]
         }
 
 def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
