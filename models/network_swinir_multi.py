@@ -498,7 +498,7 @@ class SwinIRMulti(nn.Module):
                  window_size=7, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
-                 use_checkpoint=False, upscale=2, img_range=1., upsampler='nearest+conv', 
+                 use_checkpoint=False, upscale=6, img_range=1., upsampler='nearest+conv', 
                  resi_connection='1conv'):
         super(SwinIRMulti, self).__init__()
         num_in_ch = in_chans
@@ -507,8 +507,6 @@ class SwinIRMulti(nn.Module):
         self.img_range = img_range
         self.mean = torch.zeros(1, 1, 1, 1)
         self.upscale = upscale
-        self.upsampler = upsampler
-        self.window_size = window_size
 
         # 1. 浅层特征提取
         self.conv_first = nn.Conv2d(num_in_ch, embed_dim, 3, 1, 1)
@@ -602,6 +600,33 @@ class SwinIRMulti(nn.Module):
 
         self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
 
+        # 修改上采样部分
+        if upsampler == 'nearest+conv':
+            self.upsampler = nn.Sequential(
+                nn.Conv2d(embed_dim, 64, 3, 1, 1),
+                nn.LeakyReLU(inplace=True),
+                nn.Conv2d(64, 64, 3, 1, 1),
+                nn.LeakyReLU(inplace=True),
+                nn.Conv2d(64, in_chans * (upscale ** 2), 3, 1, 1),
+                nn.PixelShuffle(upscale)
+            )
+        elif upsampler == 'pixelshuffle':
+            self.upsampler = nn.Sequential(
+                nn.Conv2d(embed_dim, 64, 3, 1, 1),
+                nn.LeakyReLU(inplace=True),
+                nn.Conv2d(64, 64, 3, 1, 1),
+                nn.LeakyReLU(inplace=True),
+                nn.Conv2d(64, in_chans * (upscale ** 2), 3, 1, 1),
+                nn.PixelShuffle(upscale)
+            )
+        elif upsampler == 'pixelshuffledirect':
+            self.upsampler = nn.Sequential(
+                nn.Conv2d(embed_dim, in_chans * (upscale ** 2), 3, 1, 1),
+                nn.PixelShuffle(upscale)
+            )
+        else:
+            raise NotImplementedError(f'Upsampler [{upsampler}] is not implemented')
+
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -687,7 +712,13 @@ class SwinIRMulti(nn.Module):
 
         gdm_x = gdm_x / self.img_range + self.mean
 
-        return gdm_x[:, :, :H*self.upscale, :W*self.upscale], gsl_x
+        # 确保输出尺寸与目标一致
+        if gdm_x.shape[2:] != (96, 96):
+            gdm_x = F.interpolate(gdm_x, size=(96, 96), mode='bilinear', align_corners=False)
+
+        x = self.upsampler(gdm_x)
+
+        return x, gsl_x
 
 if __name__ == '__main__':
     # 测试代码
