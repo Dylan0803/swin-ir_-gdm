@@ -501,106 +501,61 @@ class SwinIRMulti(nn.Module):
                  use_checkpoint=False, upscale=6, img_range=1., upsampler='nearest+conv', 
                  resi_connection='1conv'):
         super(SwinIRMulti, self).__init__()
-        num_in_ch = in_chans
-        num_out_ch = in_chans
-        num_feat = 64
-        self.img_range = img_range
-        self.mean = torch.zeros(1, 1, 1, 1)
-        self.upscale = upscale
-
-        # 1. 浅层特征提取
-        self.conv_first = nn.Conv2d(num_in_ch, embed_dim, 3, 1, 1)
-
-        # 2. 深层特征提取
-        self.num_layers = len(depths)
+        
+        # 添加window_size属性
+        self.window_size = window_size
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.in_chans = in_chans
         self.embed_dim = embed_dim
+        self.depths = depths
+        self.num_heads = num_heads
+        self.mlp_ratio = mlp_ratio
+        self.qkv_bias = qkv_bias
+        self.qk_scale = qk_scale
+        self.drop_rate = drop_rate
+        self.attn_drop_rate = attn_drop_rate
+        self.drop_path_rate = drop_path_rate
+        self.norm_layer = norm_layer
         self.ape = ape
         self.patch_norm = patch_norm
-        self.num_features = embed_dim
-        self.mlp_ratio = mlp_ratio
+        self.use_checkpoint = use_checkpoint
+        self.upscale = upscale
+        self.img_range = img_range
+        self.upsampler = upsampler
+        self.resi_connection = resi_connection
 
-        # 图像分块
-        self.patch_embed = PatchEmbed(
-            img_size=img_size, patch_size=patch_size, in_chans=embed_dim, embed_dim=embed_dim,
-            norm_layer=norm_layer if self.patch_norm else None)
-        num_patches = self.patch_embed.num_patches
-        patches_resolution = self.patch_embed.patches_resolution
-        self.patches_resolution = patches_resolution
+        # 计算图像范围
+        self.mean = torch.zeros(1, in_chans, 1, 1)
+        self.img_range = img_range
 
-        # 图像块合并
-        self.patch_unembed = PatchUnEmbed(
-            img_size=img_size, patch_size=patch_size, in_chans=embed_dim, embed_dim=embed_dim,
-            norm_layer=norm_layer if self.patch_norm else None)
+        # 浅层特征提取
+        self.conv_first = nn.Conv2d(in_chans, embed_dim, 3, 1, 1)
 
-        # 绝对位置编码
-        if self.ape:
-            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
-            trunc_normal_(self.absolute_pos_embed, std=.02)
-
-        self.pos_drop = nn.Dropout(p=drop_rate)
-
-        # 随机深度
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]
-
-        # 构建RSTB
+        # 深层特征提取
         self.layers = nn.ModuleList()
-        for i_layer in range(self.num_layers):
-            layer = RSTB(dim=embed_dim,
-                         input_resolution=(patches_resolution[0],
-                                           patches_resolution[1]),
-                         depth=depths[i_layer],
-                         num_heads=num_heads[i_layer],
-                         window_size=window_size,
-                         mlp_ratio=self.mlp_ratio,
-                         qkv_bias=qkv_bias, qk_scale=qk_scale,
-                         drop=drop_rate, attn_drop=attn_drop_rate,
-                         drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])],
-                         norm_layer=norm_layer,
-                         downsample=None,
-                         use_checkpoint=use_checkpoint,
-                         img_size=img_size,
-                         patch_size=patch_size,
-                         resi_connection=resi_connection)
+        for i_layer in range(len(depths)):
+            layer = BasicLayer(
+                dim=int(embed_dim * 2 ** i_layer),
+                input_resolution=(img_size // (2 ** i_layer), img_size // (2 ** i_layer)),
+                depth=depths[i_layer],
+                num_heads=num_heads[i_layer],
+                window_size=window_size,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                drop=drop_rate,
+                attn_drop=attn_drop_rate,
+                drop_path=drop_path_rate,
+                norm_layer=norm_layer,
+                downsample=PatchMerging if (i_layer < len(depths)-1) else None,
+                use_checkpoint=use_checkpoint)
             self.layers.append(layer)
-        self.norm = norm_layer(self.num_features)
 
-        # 深层特征提取后的卷积层
-        if resi_connection == '1conv':
-            self.conv_after_body = nn.Conv2d(embed_dim, embed_dim, 3, 1, 1)
-        elif resi_connection == '3conv':
-            self.conv_after_body = nn.Sequential(nn.Conv2d(embed_dim, embed_dim // 4, 3, 1, 1),
-                                                 nn.LeakyReLU(negative_slope=0.2, inplace=True),
-                                                 nn.Conv2d(embed_dim // 4, embed_dim // 4, 1, 1, 0),
-                                                 nn.LeakyReLU(negative_slope=0.2, inplace=True),
-                                                 nn.Conv2d(embed_dim // 4, embed_dim, 3, 1, 1))
+        # 特征融合
+        self.conv_after_body = nn.Conv2d(embed_dim, embed_dim, 3, 1, 1)
 
-        # GDM任务分支（超分辨率）
-        self.gdm_branch = nn.ModuleDict({
-            'conv_before_upsample': nn.Sequential(
-                nn.Conv2d(embed_dim, num_feat, 3, 1, 1),
-                nn.LeakyReLU(inplace=True)
-            ),
-            'conv_up1': nn.Conv2d(num_feat, num_feat, 3, 1, 1),
-            'conv_up2': nn.Conv2d(num_feat, num_feat, 3, 1, 1),
-            'conv_hr': nn.Conv2d(num_feat, num_feat, 3, 1, 1),
-            'conv_last': nn.Conv2d(num_feat, num_out_ch, 3, 1, 1)
-        })
-
-        # GSL任务分支（泄漏源定位）
-        self.gsl_branch = nn.ModuleDict({
-            'conv1': nn.Conv2d(embed_dim, 64, 3, 1, 1),
-            'conv2': nn.Conv2d(64, 32, 3, 1, 1),
-            'pool': nn.AdaptiveAvgPool2d(1),
-            'fc': nn.Sequential(
-                nn.Linear(32, 16),
-                nn.ReLU(inplace=True),
-                nn.Linear(16, 2)  # 输出泄漏源坐标(x,y)
-            )
-        })
-
-        self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
-
-        # 修改上采样部分
+        # 上采样器
         if upsampler == 'nearest+conv':
             self.upsampler = nn.Sequential(
                 nn.Conv2d(embed_dim, 64, 3, 1, 1),
@@ -627,12 +582,67 @@ class SwinIRMulti(nn.Module):
         else:
             raise NotImplementedError(f'Upsampler [{upsampler}] is not implemented')
 
+        # GSL分支
+        self.gsl_conv = nn.Sequential(
+            nn.Conv2d(in_chans, 64, 3, 1, 1),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(64, 32, 3, 1, 1),
+            nn.LeakyReLU(inplace=True)
+        )
+        self.gsl_pool = nn.AdaptiveAvgPool2d(1)
+        self.gsl_fc = nn.Sequential(
+            nn.Linear(32, 16),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(16, 2)
+        )
+
         self.apply(self._init_weights)
 
+    def check_image_size(self, x):
+        _, _, h, w = x.size()
+        mod_pad_h = (self.window_size - h % self.window_size) % self.window_size
+        mod_pad_w = (self.window_size - w % self.window_size) % self.window_size
+        if mod_pad_h != 0 or mod_pad_w != 0:
+            x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h), 'reflect')
+        return x
+
+    def forward_features(self, x):
+        x_size = (x.shape[2], x.shape[3])
+        x = self.conv_first(x)
+        x = x.permute(0, 2, 3, 1)  # B H W C
+
+        for layer in self.layers:
+            x = layer(x, x_size)
+
+        x = x.permute(0, 3, 1, 2)  # B C H W
+        return x
+
+    def forward(self, x):
+        H, W = x.shape[2:]
+        x = self.check_image_size(x)
+
+        self.mean = self.mean.type_as(x)
+        x = (x - self.mean) * self.img_range
+
+        x = self.conv_first(x)
+        x = self.conv_after_body(self.forward_features(x)) + x
+        x = self.upsampler(x)
+
+        x = x / self.img_range + self.mean
+
+        # 确保输出尺寸与目标一致
+        if x.shape[2:] != (96, 96):
+            x = F.interpolate(x, size=(96, 96), mode='bilinear', align_corners=False)
+
+        # GSL分支
+        gsl_features = self.gsl_conv(x)
+        gsl_features = self.gsl_pool(gsl_features)
+        gsl_features = gsl_features.view(gsl_features.size(0), -1)
+        gsl_out = self.gsl_fc(gsl_features)
+
+        return x, gsl_out
+
     def _init_weights(self, m):
-        """初始化权重
-        功能：使用截断正态分布初始化线性层和LayerNorm层的权重
-        """
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
@@ -640,85 +650,6 @@ class SwinIRMulti(nn.Module):
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
-
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {'absolute_pos_embed'}
-
-    @torch.jit.ignore
-    def no_weight_decay_keywords(self):
-        return {'relative_position_bias_table'}
-
-    def check_image_size(self, x):
-        """检查图像大小
-        功能：确保图像大小是窗口大小的整数倍
-        """
-        _, _, h, w = x.size()
-        mod_pad_h = (self.window_size - h % self.window_size) % self.window_size
-        mod_pad_w = (self.window_size - w % self.window_size) % self.window_size
-        x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h), 'reflect')
-        return x
-
-    def forward_features(self, x):
-        """前向特征提取
-        功能：提取深层特征
-        """
-        x_size = (x.shape[2], x.shape[3])
-        x = self.patch_embed(x)
-        if self.ape:
-            x = x + self.absolute_pos_embed
-        x = self.pos_drop(x)
-
-        for layer in self.layers:
-            x = layer(x, x_size)
-
-        x = self.norm(x)
-        x = self.patch_unembed(x, x_size)
-
-        return x
-
-    def forward(self, x):
-        """前向传播
-        功能：同时完成超分辨率和泄漏源定位两个任务
-        返回：
-            gdm_x: 超分辨率结果
-            gsl_x: 泄漏源定位结果
-        """
-        H, W = x.shape[2:]
-        x = self.check_image_size(x)
-        
-        self.mean = self.mean.type_as(x)
-        x = (x - self.mean) * self.img_range
-
-        # 共享特征提取
-        x = self.conv_first(x)
-        x = self.conv_after_body(self.forward_features(x)) + x
-
-        # GDM分支（超分辨率）
-        gdm_x = self.gdm_branch['conv_before_upsample'](x)
-        gdm_x = self.lrelu(self.gdm_branch['conv_up1'](
-            F.interpolate(gdm_x, scale_factor=2, mode='nearest')))
-        gdm_x = self.lrelu(self.gdm_branch['conv_up2'](
-            F.interpolate(gdm_x, scale_factor=2, mode='nearest')))
-        gdm_x = self.gdm_branch['conv_last'](
-            self.lrelu(self.gdm_branch['conv_hr'](gdm_x)))
-
-        # GSL分支（泄漏源定位）
-        gsl_x = self.lrelu(self.gsl_branch['conv1'](x))
-        gsl_x = self.lrelu(self.gsl_branch['conv2'](gsl_x))
-        gsl_x = self.gsl_branch['pool'](gsl_x)
-        gsl_x = gsl_x.view(gsl_x.size(0), -1)
-        gsl_x = self.gsl_branch['fc'](gsl_x)
-
-        gdm_x = gdm_x / self.img_range + self.mean
-
-        # 确保输出尺寸与目标一致
-        if gdm_x.shape[2:] != (96, 96):
-            gdm_x = F.interpolate(gdm_x, size=(96, 96), mode='bilinear', align_corners=False)
-
-        x = self.upsampler(gdm_x)
-
-        return x, gsl_x
 
 if __name__ == '__main__':
     # 测试代码
