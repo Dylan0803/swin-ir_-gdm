@@ -502,7 +502,7 @@ class SwinIRMulti(nn.Module):
                  resi_connection='1conv'):
         super(SwinIRMulti, self).__init__()
         
-        # 添加window_size属性
+        # 基本参数
         self.window_size = window_size
         self.img_size = img_size
         self.patch_size = patch_size
@@ -607,8 +607,11 @@ class SwinIRMulti(nn.Module):
         return x
 
     def forward_features(self, x):
+        """
+        提取深层特征
+        x: 输入特征 [B, C, H, W]
+        """
         x_size = (x.shape[2], x.shape[3])
-        x = self.conv_first(x)
         x = x.permute(0, 2, 3, 1)  # B H W C
 
         for layer in self.layers:
@@ -618,14 +621,26 @@ class SwinIRMulti(nn.Module):
         return x
 
     def forward(self, x):
+        """
+        前向传播
+        x: 输入图像 [B, C, H, W]
+        返回: 
+        - gdm_out: 超分辨率输出 [B, C, H*scale, W*scale]
+        - gsl_out: 泄漏源位置预测 [B, 2]
+        """
         H, W = x.shape[2:]
         x = self.check_image_size(x)
 
         self.mean = self.mean.type_as(x)
         x = (x - self.mean) * self.img_range
 
+        # 浅层特征提取
         x = self.conv_first(x)
+        
+        # 深层特征提取
         x = self.conv_after_body(self.forward_features(x)) + x
+        
+        # 上采样
         x = self.upsampler(x)
 
         x = x / self.img_range + self.mean
