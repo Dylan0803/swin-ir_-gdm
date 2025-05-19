@@ -82,8 +82,16 @@ def train_one_epoch(model, train_loader, optimizer, criterion_gdm, criterion_gsl
         hr = batch['hr'].to(device)
         source_pos = batch['source_pos'].to(device)
 
+        # 打印输入和目标尺寸
+        print(f"LR shape: {lr.shape}")
+        print(f"HR shape: {hr.shape}")
+
         optimizer.zero_grad()
         gdm_out, gsl_out = model(lr)
+        
+        # 打印模型输出尺寸
+        print(f"GDM output shape: {gdm_out.shape}")
+        print(f"GSL output shape: {gsl_out.shape}")
         
         gdm_loss = criterion_gdm(gdm_out, hr)
         gsl_loss = criterion_gsl(gsl_out, source_pos)
