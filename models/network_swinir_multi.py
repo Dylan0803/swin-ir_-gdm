@@ -505,7 +505,7 @@ class SwinIRMulti(nn.Module):
         upsampler: 上采样器类型
         resi_connection: 残差连接类型
     """
-    def __init__(self, img_size=64, patch_size=1, in_chans=1,
+    def __init__(self, img_size=16, patch_size=1, in_chans=1,
                  embed_dim=96, depths=[6, 6, 6, 6], num_heads=[6, 6, 6, 6],
                  window_size=7, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
@@ -567,7 +567,7 @@ class SwinIRMulti(nn.Module):
         # 特征融合
         self.conv_after_body = nn.Conv2d(embed_dim, embed_dim, 3, 1, 1)
 
-        # 上采样器
+        # 上采样器 - 确保输出96x96
         if upsampler == 'nearest+conv':
             self.upsampler = nn.Sequential(
                 nn.Conv2d(embed_dim, 64, 3, 1, 1),
@@ -594,7 +594,7 @@ class SwinIRMulti(nn.Module):
         else:
             raise NotImplementedError(f'Upsampler [{upsampler}] is not implemented')
 
-        # GSL分支
+        # GSL分支 - 预测泄漏源位置
         self.gsl_conv = nn.Sequential(
             nn.Conv2d(in_chans, 64, 3, 1, 1),
             nn.LeakyReLU(inplace=True),
@@ -605,7 +605,7 @@ class SwinIRMulti(nn.Module):
         self.gsl_fc = nn.Sequential(
             nn.Linear(32, 16),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(16, 2)
+            nn.Linear(16, 2)  # 输出2个值：x和y坐标
         )
 
         self.apply(self._init_weights)
@@ -638,9 +638,9 @@ class SwinIRMulti(nn.Module):
     def forward(self, x):
         """
         前向传播
-        x: 输入图像 [B, C, H, W]
+        x: 输入图像 [B, C, 16, 16]
         返回: 
-        - gdm_out: 超分辨率输出 [B, C, H*scale, W*scale]
+        - gdm_out: 超分辨率输出 [B, C, 96, 96]
         - gsl_out: 泄漏源位置预测 [B, 2]
         """
         H, W = x.shape[2:]
@@ -655,16 +655,16 @@ class SwinIRMulti(nn.Module):
         # 深层特征提取
         x = self.conv_after_body(self.forward_features(x)) + x
         
-        # 上采样
+        # 上采样到96x96
         x = self.upsampler(x)
 
         x = x / self.img_range + self.mean
 
-        # 确保输出尺寸与目标一致
+        # 确保输出尺寸为96x96
         if x.shape[2:] != (96, 96):
             x = F.interpolate(x, size=(96, 96), mode='bilinear', align_corners=False)
 
-        # GSL分支
+        # GSL分支 - 预测泄漏源位置
         gsl_features = self.gsl_conv(x)
         gsl_features = self.gsl_pool(gsl_features)
         gsl_features = gsl_features.view(gsl_features.size(0), -1)
