@@ -71,7 +71,21 @@ def calculate_psnr(img1, img2):
 def calculate_position_error(pred_pos, gt_pos):
     return torch.sqrt(torch.sum((pred_pos - gt_pos) ** 2, dim=1))
 
-def train_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, optimizer, device, epoch, total_epochs):
+def train_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, optimizer, device, epoch, total_epochs, args):
+    """
+    训练一个epoch
+    
+    参数:
+        model: 模型
+        dataloader: 数据加载器
+        gdm_criterion: GDM任务的损失函数
+        gsl_criterion: GSL任务的损失函数
+        optimizer: 优化器
+        device: 设备
+        epoch: 当前epoch
+        total_epochs: 总epoch数
+        args: 训练参数
+    """
     model.train()
     epoch_gdm_loss = 0.0
     epoch_gsl_loss = 0.0
@@ -132,7 +146,18 @@ def train_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, optimizer, 
     return epoch_gdm_loss / len(dataloader), epoch_gsl_loss / len(dataloader), epoch_total_loss / len(dataloader)
 
 @torch.no_grad()
-def valid_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, device):
+def valid_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, device, args):
+    """
+    验证一个epoch
+    
+    参数:
+        model: 模型
+        dataloader: 数据加载器
+        gdm_criterion: GDM任务的损失函数
+        gsl_criterion: GSL任务的损失函数
+        device: 设备
+        args: 训练参数
+    """
     model.eval()
     epoch_gdm_loss = 0.0
     epoch_gsl_loss = 0.0
@@ -307,11 +332,11 @@ def train(args):
     for epoch in range(start_epoch, args.epochs):
         # 训练一个epoch
         train_gdm_loss, train_gsl_loss, train_total_loss = train_one_epoch(
-            model, train_loader, criterion_gdm, criterion_gsl, optimizer, device, epoch, args.epochs)
+            model, train_loader, criterion_gdm, criterion_gsl, optimizer, device, epoch, args.epochs, args)
         
         # 验证
         valid_gdm_loss, valid_gsl_loss, valid_total_loss = valid_one_epoch(
-            model, valid_loader, criterion_gdm, criterion_gsl, device)
+            model, valid_loader, criterion_gdm, criterion_gsl, device, args)
         
         # 更新训练历史
         train_metrics['gdm_loss'].append(train_gdm_loss)
