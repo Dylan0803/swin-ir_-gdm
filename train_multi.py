@@ -17,7 +17,6 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti as net
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
-import torch.nn.functional as F
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -68,26 +67,62 @@ def calculate_psnr(img1, img2):
 def calculate_position_error(pred_pos, gt_pos):
     return torch.sqrt(torch.sum((pred_pos - gt_pos) ** 2, dim=1))
 
-def train_one_epoch(model, dataloader, optimizer, gdm_weight=1.0, gsl_weight=0.5):
-    for lr, hr, source_coords in dataloader:
+def train_one_epoch(model, train_loader, optimizer, criterion_gdm, criterion_gsl, 
+                   gdm_weight, gsl_weight, device):
+    model.train()
+    total_gdm_loss = 0
+    total_gsl_loss = 0
+    total_psnr = 0
+    total_pos_error = 0
+    n_samples = 0
+
+    pbar = tqdm(train_loader, desc='Training')
+    for batch in pbar:
+        lr = batch['lr'].to(device)
+        hr = batch['hr'].to(device)
+        source_pos = batch['source_pos'].to(device)
+
+        # 打印输入和目标尺寸
+        print(f"LR shape: {lr.shape}")
+        print(f"HR shape: {hr.shape}")
+
+        optimizer.zero_grad()
         gdm_out, gsl_out = model(lr)
         
-        # GDM损失
-        gdm_loss = F.l1_loss(gdm_out, hr)
+        # 打印模型输出尺寸
+        print(f"GDM output shape: {gdm_out.shape}")
+        print(f"GSL output shape: {gsl_out.shape}")
         
-        # GSL损失 - 在计算损失时进行归一化
-        # 假设图像大小为96x96，将坐标归一化到[0,1]范围
-        normalized_gsl_out = gsl_out / 96.0
-        normalized_source_coords = source_coords / 96.0
-        gsl_loss = F.mse_loss(normalized_gsl_out, normalized_source_coords)
+        gdm_loss = criterion_gdm(gdm_out, hr)
+        gsl_loss = criterion_gsl(gsl_out, source_pos)
+        loss = gdm_weight * gdm_loss + gsl_weight * gsl_loss
         
-        # 总损失
-        total_loss = gdm_weight * gdm_loss + gsl_weight * gsl_loss
-        
-        # 反向传播
-        optimizer.zero_grad()
-        total_loss.backward()
+        loss.backward()
         optimizer.step()
+
+        with torch.no_grad():
+            psnr = calculate_psnr(gdm_out, hr)
+            pos_error = calculate_position_error(gsl_out, source_pos)
+
+        total_gdm_loss += gdm_loss.item()
+        total_gsl_loss += gsl_loss.item()
+        total_psnr += psnr.item()
+        total_pos_error += pos_error.mean().item()
+        n_samples += lr.size(0)
+
+        pbar.set_postfix({
+            'GDM Loss': f'{gdm_loss.item():.4f}',
+            'GSL Loss': f'{gsl_loss.item():.4f}',
+            'PSNR': f'{psnr.item():.2f}',
+            'Pos Error': f'{pos_error.mean().item():.2f}'
+        })
+
+    return {
+        'gdm_loss': total_gdm_loss / n_samples,
+        'gsl_loss': total_gsl_loss / n_samples,
+        'psnr': total_psnr / n_samples,
+        'pos_error': total_pos_error / n_samples
+    }
 
 def validate(model, val_loader, criterion_gdm, criterion_gsl, device):
     model.eval()
@@ -198,7 +233,8 @@ def main():
         
         # 训练
         train_results = train_one_epoch(
-            model, train_loader, optimizer, args.gdm_weight, args.gsl_weight
+            model, train_loader, optimizer, criterion_gdm, criterion_gsl,
+            args.gdm_weight, args.gsl_weight, device
         )
         
         # 验证
