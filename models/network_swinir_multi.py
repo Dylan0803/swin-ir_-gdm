@@ -848,7 +848,3 @@ if __name__ == '__main__':
     # 前向传播
     gdm_out, gsl_out = model(x)
     
-    # 打印输出形状
-    print(f"Input shape: {x.shape}")
-    print(f"GDM output shape: {gdm_out.shape}")  # 应该是 [1, 1, 96, 96]
-    print(f"GSL output shape: {gsl_out.shape}")  # 应该是 [1, 2]
