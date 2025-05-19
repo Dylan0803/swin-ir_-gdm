@@ -1,9 +1,14 @@
+import os
+import sys
+# 添加项目根目录到Python路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+
 import argparse
 import datetime
 import json
 import random
 import numpy as np
-import os
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -11,7 +16,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti as net
-from dataset import MultiTaskDataset, generate_train_valid_dataset
+from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
 
 def parse_args():
     parser = argparse.ArgumentParser()
