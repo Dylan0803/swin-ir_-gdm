@@ -367,5 +367,35 @@ def train(args):
     
     return model, train_metrics, valid_metrics, best_loss
 
-if __name__ == '__main__':
+def main():
+    # 定义命令行参数
+    parser = argparse.ArgumentParser()
+    
+    # 模型相关参数
+    parser.add_argument('--model_name', type=str, required=True, help='模型名称')
+    parser.add_argument('--exp_name', type=str, default='default_experiment', help='实验名称')
+    parser.add_argument('--upsampler', type=str, default='nearest+conv', 
+                       choices=['pixelshuffle', 'pixelshuffledirect', 'nearest+conv'],
+                       help='上采样器类型')
+    parser.add_argument('--scale', type=int, default=6, help='上采样倍数')
+    
+    # 数据相关参数
+    parser.add_argument('--data_path', type=str, required=True, help='h5 数据路径')
+    parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
+    parser.add_argument('--patch_size', type=int, default=16, help='LR图像的patch大小')
+    
+    # 训练相关参数
+    parser.add_argument('--epochs', type=int, default=50, help='训练轮数')
+    parser.add_argument('--lr', type=float, default=0.0002, help='学习率')
+    parser.add_argument('--gdm_weight', type=float, default=1.0, help='GDM任务损失权重')
+    parser.add_argument('--gsl_weight', type=float, default=0.5, help='GSL任务损失权重')
+    
+    # 解析参数
+    args = parser.parse_args()
+    
+    # 开始训练
+    train(args)
+
+if __name__ == "__main__":
     main()
+    
