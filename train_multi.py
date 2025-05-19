@@ -17,6 +17,10 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti as net
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
+import logging
+import pandas as pd
+import time
+import shutil
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -67,137 +71,184 @@ def calculate_psnr(img1, img2):
 def calculate_position_error(pred_pos, gt_pos):
     return torch.sqrt(torch.sum((pred_pos - gt_pos) ** 2, dim=1))
 
-def train_one_epoch(model, train_loader, optimizer, criterion_gdm, criterion_gsl, 
-                   gdm_weight, gsl_weight, device):
+def train_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, optimizer, device, epoch, total_epochs):
     model.train()
-    total_gdm_loss = 0
-    total_gsl_loss = 0
-    total_psnr = 0
-    total_pos_error = 0
-    n_samples = 0
-
-    pbar = tqdm(train_loader, desc='Training')
-    for batch in pbar:
-        lr = batch['lr'].to(device)
-        hr = batch['hr'].to(device)
-        source_pos = batch['source_pos'].to(device)
-
-        # 打印输入和目标尺寸
-        print(f"LR shape: {lr.shape}")
-        print(f"HR shape: {hr.shape}")
-
-        optimizer.zero_grad()
-        gdm_out, gsl_out = model(lr)
-        
-        # 打印模型输出尺寸
-        print(f"GDM output shape: {gdm_out.shape}")
-        print(f"GSL output shape: {gsl_out.shape}")
-        
-        gdm_loss = criterion_gdm(gdm_out, hr)
-        gsl_loss = criterion_gsl(gsl_out, source_pos)
-        loss = gdm_weight * gdm_loss + gsl_weight * gsl_loss
-        
-        loss.backward()
-        optimizer.step()
-
-        with torch.no_grad():
-            psnr = calculate_psnr(gdm_out, hr)
-            pos_error = calculate_position_error(gsl_out, source_pos)
-
-        total_gdm_loss += gdm_loss.item()
-        total_gsl_loss += gsl_loss.item()
-        total_psnr += psnr.item()
-        total_pos_error += pos_error.mean().item()
-        n_samples += lr.size(0)
-
-        pbar.set_postfix({
-            'GDM Loss': f'{gdm_loss.item():.4f}',
-            'GSL Loss': f'{gsl_loss.item():.4f}',
-            'PSNR': f'{psnr.item():.2f}',
-            'Pos Error': f'{pos_error.mean().item():.2f}'
-        })
-
-    return {
-        'gdm_loss': total_gdm_loss / n_samples,
-        'gsl_loss': total_gsl_loss / n_samples,
-        'psnr': total_psnr / n_samples,
-        'pos_error': total_pos_error / n_samples
-    }
-
-def validate(model, val_loader, criterion_gdm, criterion_gsl, device):
-    model.eval()
-    total_gdm_loss = 0
-    total_gsl_loss = 0
-    total_psnr = 0
-    total_pos_error = 0
-    n_samples = 0
-
-    with torch.no_grad():
-        for batch in tqdm(val_loader, desc='Validation'):
+    epoch_gdm_loss = 0.0
+    epoch_gsl_loss = 0.0
+    epoch_total_loss = 0.0
+    
+    tbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{total_epochs}")
+    
+    for batch in tbar:
+        try:
+            # 数据预处理
             lr = batch['lr'].to(device)
             hr = batch['hr'].to(device)
             source_pos = batch['source_pos'].to(device)
-
+            
+            optimizer.zero_grad()
+            
+            # 前向传播
             gdm_out, gsl_out = model(lr)
             
-            gdm_loss = criterion_gdm(gdm_out, hr)
-            gsl_loss = criterion_gsl(gsl_out, source_pos)
+            # 计算损失
+            gdm_loss = gdm_criterion(gdm_out, hr)
+            gsl_loss = gsl_criterion(gsl_out, source_pos)
+            total_loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
             
-            psnr = calculate_psnr(gdm_out, hr)
-            pos_error = calculate_position_error(gsl_out, source_pos)
+            # 检查损失值
+            if torch.isnan(total_loss):
+                print(f"Warning: NaN loss detected! Skipping batch...")
+                continue
+            
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            
+            # 更新统计信息
+            epoch_gdm_loss += gdm_loss.item()
+            epoch_gsl_loss += gsl_loss.item()
+            epoch_total_loss += total_loss.item()
+            
+            # 更新进度条
+            tbar.set_postfix({
+                'GDM Loss': f"{gdm_loss.item():.4f}",
+                'GSL Loss': f"{gsl_loss.item():.4f}",
+                'Total Loss': f"{total_loss.item():.4f}"
+            })
+            
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+        except RuntimeError as e:
+            if "out of memory" in str(e):
+                print(f"Warning: GPU OOM! Clearing cache and skipping batch...")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                continue
+            else:
+                raise e
+    
+    return epoch_gdm_loss / len(dataloader), epoch_gsl_loss / len(dataloader), epoch_total_loss / len(dataloader)
 
-            total_gdm_loss += gdm_loss.item()
-            total_gsl_loss += gsl_loss.item()
-            total_psnr += psnr.item()
-            total_pos_error += pos_error.mean().item()
-            n_samples += lr.size(0)
+@torch.no_grad()
+def valid_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, device):
+    model.eval()
+    epoch_gdm_loss = 0.0
+    epoch_gsl_loss = 0.0
+    epoch_total_loss = 0.0
+    
+    for batch in dataloader:
+        lr = batch['lr'].to(device)
+        hr = batch['hr'].to(device)
+        source_pos = batch['source_pos'].to(device)
+        
+        gdm_out, gsl_out = model(lr)
+        
+        gdm_loss = gdm_criterion(gdm_out, hr)
+        gsl_loss = gsl_criterion(gsl_out, source_pos)
+        total_loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
+        
+        epoch_gdm_loss += gdm_loss.item()
+        epoch_gsl_loss += gsl_loss.item()
+        epoch_total_loss += total_loss.item()
+    
+    return epoch_gdm_loss / len(dataloader), epoch_gsl_loss / len(dataloader), epoch_total_loss / len(dataloader)
 
-    return {
-        'gdm_loss': total_gdm_loss / n_samples,
-        'gsl_loss': total_gsl_loss / n_samples,
-        'psnr': total_psnr / n_samples,
-        'pos_error': total_pos_error / n_samples
-    }
-
-def plot_metrics(train_metrics, val_metrics, save_dir):
-    metrics = ['gdm_loss', 'gsl_loss', 'psnr', 'pos_error']
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    axes = axes.ravel()
-
-    for idx, metric in enumerate(metrics):
-        ax = axes[idx]
-        ax.plot(train_metrics[metric], label='Train')
-        ax.plot(val_metrics[metric], label='Validation')
-        ax.set_title(metric.upper())
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Value')
-        ax.legend()
-        ax.grid(True)
-
+def plot_metrics(args, train_metrics, valid_metrics, save_dir):
+    """绘制训练指标曲线"""
+    plt.figure(figsize=(15, 5))
+    
+    # GDM损失
+    plt.subplot(131)
+    plt.plot(train_metrics['gdm_loss'], label='Train GDM Loss')
+    plt.plot(valid_metrics['gdm_loss'], label='Valid GDM Loss')
+    plt.title('GDM Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    
+    # GSL损失
+    plt.subplot(132)
+    plt.plot(train_metrics['gsl_loss'], label='Train GSL Loss')
+    plt.plot(valid_metrics['gsl_loss'], label='Valid GSL Loss')
+    plt.title('GSL Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    
+    # 总损失
+    plt.subplot(133)
+    plt.plot(train_metrics['total_loss'], label='Train Total Loss')
+    plt.plot(valid_metrics['total_loss'], label='Valid Total Loss')
+    plt.title('Total Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'training_metrics.png'))
     plt.close()
 
-def main():
-    args = parse_args()
-    set_seed(42)
+def save_training_history(train_metrics, valid_metrics, save_dir):
+    """保存训练历史到CSV文件"""
+    history_df = pd.DataFrame({
+        'epoch': range(1, len(train_metrics['gdm_loss']) + 1),
+        'train_gdm_loss': train_metrics['gdm_loss'],
+        'train_gsl_loss': train_metrics['gsl_loss'],
+        'train_total_loss': train_metrics['total_loss'],
+        'valid_gdm_loss': valid_metrics['gdm_loss'],
+        'valid_gsl_loss': valid_metrics['gsl_loss'],
+        'valid_total_loss': valid_metrics['total_loss']
+    })
+    history_df.to_csv(os.path.join(save_dir, 'training_history.csv'), index=False)
 
-    # 创建保存目录
-    save_dir = os.path.join(args.save_dir, f'{args.model_name}_{args.exp_name}')
-    os.makedirs(save_dir, exist_ok=True)
+def save_args(args, model_dir):
+    # 实现保存参数的逻辑
+    pass
 
-    # 保存训练参数
-    with open(os.path.join(save_dir, 'args.json'), 'w') as f:
-        json.dump(vars(args), f, indent=4)
+def train(args):
+    logging.basicConfig(level=logging.INFO)
+    print(f"Starting training with arguments: {args}")
+    print(f"Using multi-task learning with GDM and GSL")
+    print(f"Upsampler mode: {args.upsampler}")
 
-    # 设置设备
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Using device: {device}')
+    # CUDA设置和内存管理
+    torch.cuda.empty_cache()
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = True
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == 'cuda':
+        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+        print(f"GPU Memory Usage:")
+        print(f"Allocated: {torch.cuda.memory_allocated(0)/1024**2:.2f} MB")
+        print(f"Cached: {torch.cuda.memory_reserved(0)/1024**2:.2f} MB")
+    print(f"Using device: {device}")
 
-    # 创建数据集和数据加载器
-    train_dataset, val_dataset = generate_train_valid_dataset(args.data_path)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    # 数据集加载和打印信息
+    train_set, valid_set = generate_train_valid_dataset(
+        args.data_path, train_ratio=0.8, shuffle=True)
+
+    train_loader = DataLoader(
+        train_set, batch_size=args.batch_size, shuffle=True,
+        num_workers=0, pin_memory=True)
+    valid_loader = DataLoader(
+        valid_set, batch_size=args.batch_size, shuffle=False,
+        num_workers=0, pin_memory=True)
+
+    # 打印数据集信息
+    sample = next(iter(train_loader))
+    print(f"Data shapes:")
+    print(f"LR: {sample['lr'].shape}")
+    print(f"HR: {sample['hr'].shape}")
+    print(f"Source position: {sample['source_pos'].shape}")
+    print(f"HR max position: {sample['hr_max_pos'].shape}")
+    print(f"Data ranges:")
+    print(f"LR: [{sample['lr'].min():.4f}, {sample['lr'].max():.4f}]")
+    print(f"HR: [{sample['hr'].min():.4f}, {sample['hr'].max():.4f}]")
+    print(f"Source position: [{sample['source_pos'].min():.4f}, {sample['source_pos'].max():.4f}]")
+    print(f"HR max position: [{sample['hr_max_pos'].min():.4f}, {sample['hr_max_pos'].max():.4f}]")
 
     # 创建模型
     model = net(
@@ -223,60 +274,98 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = MultiStepLR(optimizer, milestones=[20, 40], gamma=0.5)
 
+    # 创建保存目录
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    experiment_dir = os.path.join("experiments", f"{args.exp_name}_{timestamp}")
+    model_dir = os.path.join(experiment_dir, args.model_name)
+    os.makedirs(experiment_dir, exist_ok=True)
+    os.makedirs(model_dir, exist_ok=True)
+    
+    # 保存训练参数
+    save_args(args, model_dir)
+    
+    # 初始化训练历史
+    train_metrics = {'gdm_loss': [], 'gsl_loss': [], 'total_loss': []}
+    valid_metrics = {'gdm_loss': [], 'gsl_loss': [], 'total_loss': []}
+    best_loss = float('inf')
+    start_epoch = 0
+    
+    # 检查是否有checkpoint
+    checkpoint_path = os.path.join(model_dir, "latest_checkpoint.pth")
+    if os.path.exists(checkpoint_path):
+        print(f"Loading checkpoint from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch']
+        train_metrics = checkpoint['train_metrics']
+        valid_metrics = checkpoint['valid_metrics']
+        best_loss = checkpoint['best_loss']
+        print(f"Resuming from epoch {start_epoch}")
+    
     # 训练循环
-    best_val_psnr = 0
-    train_metrics = {metric: [] for metric in ['gdm_loss', 'gsl_loss', 'psnr', 'pos_error']}
-    val_metrics = {metric: [] for metric in ['gdm_loss', 'gsl_loss', 'psnr', 'pos_error']}
-
-    for epoch in range(args.epochs):
-        print(f'\nEpoch {epoch+1}/{args.epochs}')
-        
-        # 训练
-        train_results = train_one_epoch(
-            model, train_loader, optimizer, criterion_gdm, criterion_gsl,
-            args.gdm_weight, args.gsl_weight, device
-        )
+    for epoch in range(start_epoch, args.epochs):
+        # 训练一个epoch
+        train_gdm_loss, train_gsl_loss, train_total_loss = train_one_epoch(
+            model, train_loader, criterion_gdm, criterion_gsl, optimizer, device, epoch, args.epochs)
         
         # 验证
-        val_results = validate(model, val_loader, criterion_gdm, criterion_gsl, device)
+        valid_gdm_loss, valid_gsl_loss, valid_total_loss = valid_one_epoch(
+            model, valid_loader, criterion_gdm, criterion_gsl, device)
         
-        # 更新学习率
-        scheduler.step()
+        # 更新训练历史
+        train_metrics['gdm_loss'].append(train_gdm_loss)
+        train_metrics['gsl_loss'].append(train_gsl_loss)
+        train_metrics['total_loss'].append(train_total_loss)
+        valid_metrics['gdm_loss'].append(valid_gdm_loss)
+        valid_metrics['gsl_loss'].append(valid_gsl_loss)
+        valid_metrics['total_loss'].append(valid_total_loss)
         
-        # 记录指标
-        for metric in train_metrics:
-            train_metrics[metric].append(train_results[metric])
-            val_metrics[metric].append(val_results[metric])
-        
-        # 打印结果
-        print(f'Train - GDM Loss: {train_results["gdm_loss"]:.4f}, GSL Loss: {train_results["gsl_loss"]:.4f}, '
-              f'PSNR: {train_results["psnr"]:.2f}, Pos Error: {train_results["pos_error"]:.2f}')
-        print(f'Val - GDM Loss: {val_results["gdm_loss"]:.4f}, GSL Loss: {val_results["gsl_loss"]:.4f}, '
-              f'PSNR: {val_results["psnr"]:.2f}, Pos Error: {val_results["pos_error"]:.2f}')
+        # 打印训练信息
+        print(f"\nEpoch {epoch+1}/{args.epochs}")
+        print(f"Train - GDM Loss: {train_gdm_loss:.4f}, GSL Loss: {train_gsl_loss:.4f}, Total Loss: {train_total_loss:.4f}")
+        print(f"Valid - GDM Loss: {valid_gdm_loss:.4f}, GSL Loss: {valid_gsl_loss:.4f}, Total Loss: {valid_total_loss:.4f}")
+        print(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         
         # 保存最佳模型
-        if val_results['psnr'] > best_val_psnr:
-            best_val_psnr = val_results['psnr']
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'best_val_psnr': best_val_psnr,
-            }, os.path.join(save_dir, 'best_model.pth'))
+        if valid_total_loss < best_loss:
+            best_loss = valid_total_loss
+            torch.save(model.state_dict(), os.path.join(model_dir, "best_model.pth"))
+            print(f"Best model saved at epoch {epoch+1} with valid loss {best_loss:.4f}")
         
-        # 定期保存检查点
-        if (epoch + 1) % args.save_interval == 0:
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'best_val_psnr': best_val_psnr,
-            }, os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth'))
+        # 保存checkpoint
+        checkpoint = {
+            'epoch': epoch + 1,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'train_metrics': train_metrics,
+            'valid_metrics': valid_metrics,
+            'best_loss': best_loss,
+            'args': args
+        }
+        torch.save(checkpoint, os.path.join(model_dir, "latest_checkpoint.pth"))
+        
+        # 每10个epoch保存一次历史checkpoint
+        if (epoch + 1) % 10 == 0:
+            history_checkpoint_path = os.path.join(model_dir, f"checkpoint_epoch_{epoch+1}.pth")
+            torch.save(checkpoint, history_checkpoint_path)
+            print(f"Checkpoint saved at epoch {epoch+1}")
+        
+        # 绘制和保存训练曲线
+        plot_metrics(args, train_metrics, valid_metrics, model_dir)
+        save_training_history(train_metrics, valid_metrics, model_dir)
     
-    # 绘制训练指标
-    plot_metrics(train_metrics, val_metrics, save_dir)
+    # 保存最佳模型副本
+    best_model_path = os.path.join(model_dir, "best_model.pth")
+    if os.path.exists(best_model_path):
+        shutil.copy2(best_model_path, os.path.join(experiment_dir, f"{args.model_name}_best_model.pth"))
+        print(f"Best model copy saved to: {os.path.join(experiment_dir, f'{args.model_name}_best_model.pth')}")
+    
+    print("\nTraining completed!")
+    print(f"Best validation loss: {best_loss:.4f}")
+    print(f"Model and checkpoints saved in {model_dir}")
+    
+    return model, train_metrics, valid_metrics, best_loss
 
 if __name__ == '__main__':
     main()
