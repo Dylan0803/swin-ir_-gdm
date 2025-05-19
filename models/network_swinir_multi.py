@@ -316,28 +316,40 @@ class BasicLayer(nn.Module):
         self.depth = depth
         self.use_checkpoint = use_checkpoint
 
+        # 构建Swin Transformer块
         self.blocks = nn.ModuleList([
-            SwinTransformerBlock(dim=dim, input_resolution=input_resolution,
-                                 num_heads=num_heads, window_size=window_size,
-                                 shift_size=0 if (i % 2 == 0) else window_size // 2,
-                                 mlp_ratio=mlp_ratio,
-                                 qkv_bias=qkv_bias, qk_scale=qk_scale,
-                                 drop=drop, attn_drop=attn_drop,
-                                 drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
-                                 norm_layer=norm_layer)
+            SwinTransformerBlock(
+                dim=dim,
+                input_resolution=input_resolution,
+                num_heads=num_heads,
+                window_size=window_size,
+                shift_size=0 if (i % 2 == 0) else window_size // 2,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                drop=drop,
+                attn_drop=attn_drop,
+                drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
+                norm_layer=norm_layer)
             for i in range(depth)])
 
+        # 下采样层
         if downsample is not None:
             self.downsample = downsample(input_resolution, dim=dim, norm_layer=norm_layer)
         else:
             self.downsample = None
 
     def forward(self, x, x_size):
+        """
+        x: 输入特征 [B, H, W, C]
+        x_size: 特征图大小 (H, W)
+        """
         for blk in self.blocks:
             if self.use_checkpoint:
                 x = checkpoint.checkpoint(blk, x, x_size)
             else:
                 x = blk(x, x_size)
+
         if self.downsample is not None:
             x = self.downsample(x)
         return x
@@ -612,11 +624,14 @@ class SwinIRMulti(nn.Module):
         x: 输入特征 [B, C, H, W]
         """
         x_size = (x.shape[2], x.shape[3])
+        
+        # 将特征图转换为 [B, H, W, C] 格式
         x = x.permute(0, 2, 3, 1)  # B H W C
 
         for layer in self.layers:
             x = layer(x, x_size)
 
+        # 将特征图转换回 [B, C, H, W] 格式
         x = x.permute(0, 3, 1, 2)  # B C H W
         return x
 
