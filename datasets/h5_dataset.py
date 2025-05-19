@@ -1,5 +1,5 @@
 """
-最开始进行超分辨率所用的数据集读取程序，读取至神经网络的输入
+多任务学习数据集加载器，用于超分辨率重建和泄漏源位置预测
 """
 import torch
 from torch.utils.data import Dataset
@@ -8,10 +8,7 @@ import numpy as np
 import random
 import os
 
-# 自定义数据集类，继承自 PyTorch 的 Dataset
-
-
-class ConcDatasetTorch(Dataset):
+class MultiTaskDataset(Dataset):
     def __init__(self, dataset_file_name, index_list=None, shuffle=True):
         """
         参数：
@@ -19,27 +16,36 @@ class ConcDatasetTorch(Dataset):
         index_list：用于指定使用哪些索引，默认使用全部
         shuffle：是否在 index_list 内部进行打乱
         """
-        super(ConcDatasetTorch, self).__init__()
+        super(MultiTaskDataset, self).__init__()
         self.dataset_file = h5py.File(dataset_file_name, 'r')
-
-        # 加载 'HR' 和 'LR' 数据组
-        self.hr_data = self.dataset_file['HR']
-        self.lr_data = self.dataset_file['LR']
-
-        # 确保 HR 和 LR 数量一致
-        assert len(self.lr_data) == len(self.hr_data), \
-            f'Mismatch in HR and LR dataset lengths: {len(self.lr_data)} vs {len(self.hr_data)}'
-
-        self.dataset_length = len(self.lr_data)
-
+        
+        # 构建数据索引列表
+        self.data_indices = []
+        
+        # 遍历所有风场组
+        for wind_group_name in self.dataset_file.keys():
+            wind_group = self.dataset_file[wind_group_name]
+            # 遍历所有源位置
+            for source_idx in range(1, 9):
+                source_group = wind_group[f's{source_idx}']
+                # 获取时间步数量
+                time_steps = len([k for k in source_group.keys() if k.startswith('HR_')])
+                # 为每个时间步创建索引
+                for time_step in range(1, time_steps + 1):
+                    self.data_indices.append({
+                        'wind_group': wind_group_name,
+                        'source_idx': source_idx,
+                        'time_step': time_step
+                    })
+        
         # 如果未指定索引列表，就使用全部数据
         if index_list is None:
-            index_list = list(range(self.dataset_length))
-
+            index_list = list(range(len(self.data_indices)))
+        
         # 是否打乱索引
         if shuffle:
             random.shuffle(index_list)
-
+        
         self.index_list = index_list
 
     def __len__(self):
@@ -47,26 +53,51 @@ class ConcDatasetTorch(Dataset):
 
     def __getitem__(self, idx):
         """
-        返回数据时，自动读取 HR 和 LR 并加上 channel 维度： [H, W] → [1, H, W]
+        返回数据时，自动读取 LR、HR 和泄漏源位置信息
+        返回：
+        - lr_tensor: 低分辨率数据 [1, H, W]
+        - hr_tensor: 高分辨率数据 [1, H, W]
+        - source_pos: 泄漏源位置真值 [2] (x, y坐标)
+        - hr_max_pos: HR中浓度最高值的位置 [2] (x, y坐标)
         """
         idx_in_file = self.index_list[idx]
-        lr = self.lr_data[idx_in_file]
-        hr = self.hr_data[idx_in_file]
-
+        data_info = self.data_indices[idx_in_file]
+        
+        # 获取数据组
+        wind_group = self.dataset_file[data_info['wind_group']]
+        source_group = wind_group[f's{data_info["source_idx"]}']
+        
+        # 读取LR和HR数据
+        lr = source_group[f'LR_{data_info["time_step"]}'][:]
+        hr = source_group[f'HR_{data_info["time_step"]}'][:]
+        
+        # 读取泄漏源位置信息（前两个值是x, y坐标）
+        source_info = source_group['source_info'][:]
+        source_pos = source_info[:2]  # 只取位置信息
+        
+        # 计算HR中浓度最高值的位置
+        # 注意：numpy的unravel_index返回的是(y, x)顺序，需要转换为(x, y)
+        hr_max_pos = np.unravel_index(hr.argmax(), hr.shape)
+        hr_max_pos = np.array([hr_max_pos[1], hr_max_pos[0]], dtype=np.float32)  # 转换为(x, y)顺序
+        
         # 增加通道维度
         if len(lr.shape) == 2:
             lr = lr[np.newaxis, :, :]
         if len(hr.shape) == 2:
             hr = hr[np.newaxis, :, :]
-
-        # 转换为 tensor
+        
+        # 转换为tensor
         lr_tensor = torch.tensor(lr, dtype=torch.float32)
         hr_tensor = torch.tensor(hr, dtype=torch.float32)
-
-        return lr_tensor, hr_tensor
-
-# 划分训练集和验证集（8:2）
-
+        source_pos_tensor = torch.tensor(source_pos, dtype=torch.float32)
+        hr_max_pos_tensor = torch.tensor(hr_max_pos, dtype=torch.float32)
+        
+        return {
+            'lr': lr_tensor,          # 输入数据
+            'hr': hr_tensor,          # 超分辨率任务的目标
+            'source_pos': source_pos_tensor,  # 泄漏源位置真值
+            'hr_max_pos': hr_max_pos_tensor  # HR中浓度最高位置，用于学习位置关系
+        }
 
 def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
     """
@@ -76,152 +107,47 @@ def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
     返回：训练集对象，验证集对象
     """
     with h5py.File(data_file, 'r') as f:
-        total_len = len(f['HR'])
+        # 计算总数据量
+        total_len = 0
+        for wind_group_name in f.keys():
+            wind_group = f[wind_group_name]
+            for source_idx in range(1, 9):
+                source_group = wind_group[f's{source_idx}']
+                total_len += len([k for k in source_group.keys() if k.startswith('HR_')])
+        
         index_list = list(range(total_len))
-
+        
         if shuffle:
             random.shuffle(index_list)
-
+        
         split_idx = int(train_ratio * total_len)
         train_list = index_list[:split_idx]
         valid_list = index_list[split_idx:]
-
+    
     # 创建数据集实例
-    train_dataset = ConcDatasetTorch(data_file, train_list, shuffle=False)
-    valid_dataset = ConcDatasetTorch(data_file, valid_list, shuffle=False)
+    train_dataset = MultiTaskDataset(data_file, train_list, shuffle=False)
+    valid_dataset = MultiTaskDataset(data_file, valid_list, shuffle=False)
     return train_dataset, valid_dataset
 
-
-def augment_dataset(h5_path, output_path):
-    """
-    对数据集进行增强，生成5种增强情况
-    
-    Args:
-        h5_path: 原始h5文件路径
-        output_path: 增强后的h5文件路径
-    """
-    with h5py.File(h5_path, 'r') as f_in, h5py.File(output_path, 'w') as f_out:
-        # 处理每种风场情况
-        for wind_idx in range(1, 4):
-            wind_group = f_in[f'wind{wind_idx}']
-            
-            # 创建原始数据组（添加_0后缀）
-            wind_out_group = f_out.create_group(f'wind{wind_idx}_0')
-            wind_out_group.create_dataset('points', data=wind_group['points'][:])
-            wind_out_group.create_dataset('velocity', data=wind_group['velocity'][:])
-            
-            # 处理每种源位置
-            for source_idx in range(1, 9):
-                source_group = wind_group[f's{source_idx}']
-                source_out_group = wind_out_group.create_group(f's{source_idx}')
-                
-                # 复制原始数据
-                for i in range(1, len([k for k in source_group.keys() if k.startswith('HR_')]) + 1):
-                    source_out_group.create_dataset(f'HR_{i}', data=source_group[f'HR_{i}'][:], compression='gzip')
-                    source_out_group.create_dataset(f'LR_{i}', data=source_group[f'LR_{i}'][:], compression='gzip')
-                    # 复制元数据
-                    for key, value in source_group[f'HR_{i}'].attrs.items():
-                        source_out_group[f'HR_{i}'].attrs[key] = value
-                        source_out_group[f'LR_{i}'].attrs[key] = value
-                
-                # 复制源位置信息
-                source_out_group.create_dataset('source_info', data=source_group['source_info'][:])
-            
-            # 定义增强操作
-            augmentations = {
-                'rot90': lambda x: np.rot90(x, k=1),
-                'rot180': lambda x: np.rot90(x, k=2),
-                'rot270': lambda x: np.rot90(x, k=3),
-                'flip_h': lambda x: np.fliplr(x),
-                'flip_v': lambda x: np.flipud(x)
-            }
-            
-            # 对每种增强操作进行处理
-            for aug_name, aug_func in augmentations.items():
-                # 创建增强后的风场组
-                wind_aug_group = f_out.create_group(f'wind{wind_idx}_{aug_name}')
-                
-                # 处理风场数据
-                points = wind_group['points'][:]
-                velocity = wind_group['velocity'][:]
-                
-                # 根据不同的增强操作处理风场数据
-                if 'rot' in aug_name:
-                    # 旋转操作
-                    center = np.array([48, 48])
-                    relative_points = points - center
-                    if aug_name == 'rot90':
-                        rotation_matrix = np.array([[0, -1], [1, 0]])
-                    elif aug_name == 'rot180':
-                        rotation_matrix = np.array([[-1, 0], [0, -1]])
-                    else:  # rot270
-                        rotation_matrix = np.array([[0, 1], [-1, 0]])
-                    
-                    relative_points = np.dot(relative_points, rotation_matrix.T)
-                    velocity = np.dot(velocity, rotation_matrix.T)
-                    points = relative_points + center
-                else:
-                    # 翻转操作
-                    if aug_name == 'flip_h':
-                        points[:, 0] = 96 - points[:, 0]
-                        velocity[:, 0] = -velocity[:, 0]
-                    else:  # flip_v
-                        points[:, 1] = 96 - points[:, 1]
-                        velocity[:, 1] = -velocity[:, 1]
-                
-                wind_aug_group.create_dataset('points', data=points)
-                wind_aug_group.create_dataset('velocity', data=velocity)
-                
-                # 处理每种源位置
-                for source_idx in range(1, 9):
-                    source_group = wind_group[f's{source_idx}']
-                    source_aug_group = wind_aug_group.create_group(f's{source_idx}')
-                    
-                    # 处理每个时间步
-                    for i in range(1, len([k for k in source_group.keys() if k.startswith('HR_')]) + 1):
-                        # 增强浓度数据
-                        hr_data = aug_func(source_group[f'HR_{i}'][:])
-                        lr_data = aug_func(source_group[f'LR_{i}'][:])
-                        
-                        source_aug_group.create_dataset(f'HR_{i}', data=hr_data, compression='gzip')
-                        source_aug_group.create_dataset(f'LR_{i}', data=lr_data, compression='gzip')
-                        
-                        # 复制元数据
-                        for key, value in source_group[f'HR_{i}'].attrs.items():
-                            source_aug_group[f'HR_{i}'].attrs[key] = value
-                            source_aug_group[f'LR_{i}'].attrs[key] = value
-                    
-                    # 处理源位置信息
-                    source_info = source_group['source_info'][:]
-                    if 'rot' in aug_name:
-                        # 旋转源位置
-                        center = np.array([48, 48])
-                        relative_pos = source_info[:2] - center
-                        relative_pos = np.dot(relative_pos, rotation_matrix.T)
-                        source_info[:2] = relative_pos + center
-                    else:
-                        # 翻转源位置
-                        if aug_name == 'flip_h':
-                            source_info[0] = 96 - source_info[0]
-                        else:  # flip_v
-                            source_info[1] = 96 - source_info[1]
-                    
-                    source_aug_group.create_dataset('source_info', data=source_info)
-
-def main():
-    # 设置路径
-    data_root = 'C:\\Users\\yy143\\Desktop\\dataset\\data'  # 原始数据根目录
-    output_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\dataset.h5'  # 输出h5文件路径
-    aug_output_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\augmented_dataset.h5'  # 增强后的h5文件路径
-    
-    # 创建输出目录（如果不存在）
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
-    # 转换数据
-    txt_to_h5(data_root, output_path)
-    
-    # 进行数据增强
-    augment_dataset(output_path, aug_output_path)
-
 if __name__ == '__main__':
-    main()
+    # 测试数据集加载
+    h5_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\normalized_augmented_dataset.h5'
+    
+    # 创建数据集实例
+    dataset = MultiTaskDataset(h5_path)
+    print(f"数据集大小: {len(dataset)}")
+    
+    # 获取一个样本
+    sample = dataset[0]
+    print("\n样本信息:")
+    print(f"LR数据形状: {sample['lr'].shape}")
+    print(f"HR数据形状: {sample['hr'].shape}")
+    print(f"泄漏源位置真值: {sample['source_pos']}")
+    print(f"HR最大浓度位置: {sample['hr_max_pos']}")
+    
+    # 验证数据
+    print("\n数据验证:")
+    print(f"泄漏源位置真值类型: {sample['source_pos'].dtype}")
+    print(f"HR最大浓度位置类型: {sample['hr_max_pos'].dtype}")
+    print(f"LR数据范围: [{sample['lr'].min():.4f}, {sample['lr'].max():.4f}]")
+    print(f"HR数据范围: [{sample['hr'].min():.4f}, {sample['hr'].max():.4f}]")
