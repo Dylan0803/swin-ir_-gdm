@@ -9,6 +9,7 @@ from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
 import pandas as pd
 import h5py
 import argparse
+import torch.nn as nn
 
 def evaluate_model(model, dataloader, device):
     """
@@ -179,6 +180,12 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
 
+    # 检查数据范围
+    print("Before visualization:")
+    print("LR stats:", torch.min(lr).item(), torch.max(lr).item(), torch.mean(lr).item())
+    print("HR stats:", torch.min(hr).item(), torch.max(hr).item(), torch.mean(hr).item())
+    print("GDM stats:", torch.min(gdm_out).item(), torch.max(gdm_out).item(), torch.mean(gdm_out).item())
+
 def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
     """
     使用模型进行推理并可视化结果
@@ -234,14 +241,27 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
         # 添加打印语句检查输入数据
         print("Input LR range:", torch.min(lr).item(), torch.max(lr).item())
         
-        # 模型推理
+        # 添加中间结果检查
         with torch.no_grad():
+            # 检查输入
+            print("Input shape:", lr.shape)
+            print("Input device:", lr.device)
+            
+            # 检查模型状态
+            print("Model device:", next(model.parameters()).device)
+            print("Model training mode:", model.training)
+            
+            # 检查中间层输出
+            x = model.conv_first(lr)
+            print("After conv_first:", x.shape, torch.min(x).item(), torch.max(x).item())
+            
+            # 检查每个主要层的输出
+            for name, module in model.named_modules():
+                if isinstance(module, (nn.Conv2d, nn.Linear)):
+                    print(f"{name} output stats:", torch.min(x).item(), torch.max(x).item())
+            
             gdm_out, gsl_out = model(lr)
-            # 添加中间结果检查
-            print("GDM output shape:", gdm_out.shape)
-            print("GSL output shape:", gsl_out.shape)
-            print("GDM output type:", gdm_out.dtype)
-            print("Model output range:", torch.min(gdm_out).item(), torch.max(gdm_out).item())
+            print("After full model:", torch.min(gdm_out).item(), torch.max(gdm_out).item())
         
         # 可视化结果
         save_path = os.path.join(save_dir, f'inference_result_{i+1}.png')
@@ -255,6 +275,11 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
         print(f"\n样本 {i+1} 的评估结果:")
         print(f"PSNR: {psnr.item():.2f} dB")
         print(f"位置误差: {position_error.item():.4f}")
+
+        # 在数据加载时添加检查
+        print("Data loading stats:")
+        print("LR stats:", torch.min(lr).item(), torch.max(lr).item(), torch.mean(lr).item())
+        print("HR stats:", torch.min(hr).item(), torch.max(hr).item(), torch.mean(hr).item())
 
 def parse_args():
     parser = argparse.ArgumentParser(description='模型推理和可视化')
@@ -274,23 +299,13 @@ def main():
     # 解析命令行参数
     args = parse_args()
     
-    # 加载模型
-    model = SwinIRMulti(
-        img_size=16,
-        patch_size=1,
-        in_chans=1,
-        embed_dim=60,
-        depths=[6, 6, 6, 6],
-        num_heads=[6, 6, 6, 6],
-        window_size=8,
-        mlp_ratio=2,
-        upscale=6,
-        img_range=1.,
-        upsampler='nearest+conv',
-        resi_connection='1conv'
-    )
-    
-    model.load_state_dict(torch.load(args.model_path, map_location='cpu'))
+    # 检查模型加载
+    model = SwinIRMulti()
+    checkpoint = torch.load(args.model_path, map_location='cpu')
+    print("Checkpoint keys:", checkpoint.keys())
+    print("Model state dict keys:", checkpoint['model'].keys())
+    model.load_state_dict(checkpoint['model'])
+    model.eval()
     
     # 进行推理和可视化
     infer_model(model, args.data_path, args.save_dir, 
