@@ -190,9 +190,21 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
         num_samples: 要推理的样本数量
         use_valid: 是否使用验证集
     """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "device")
     model = model.to(device)
     model.eval()
+    
+    # 添加模型状态检查
+    print("Model device:", next(model.parameters()).device)
+    print("Model training mode:", model.training)
+    
+    # 检查模型结构
+    print("Model structure:", model)
+    
+    # 检查模型权重
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(f"{name}: {param.data.abs().mean().item()}")
     
     # 创建保存目录
     os.makedirs(save_dir, exist_ok=True)
@@ -225,6 +237,10 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
         # 模型推理
         with torch.no_grad():
             gdm_out, gsl_out = model(lr)
+            # 添加中间结果检查
+            print("GDM output shape:", gdm_out.shape)
+            print("GSL output shape:", gsl_out.shape)
+            print("GDM output type:", gdm_out.dtype)
             
         # 添加打印语句检查模型输出
         print("Model output range:", torch.min(gdm_out).item(), torch.max(gdm_out).item())
