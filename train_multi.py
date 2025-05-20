@@ -91,7 +91,11 @@ def train_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, optimizer, 
     epoch_gsl_loss = 0.0
     epoch_total_loss = 0.0
     
-    tbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{total_epochs}")
+    # 使用tqdm创建进度条，添加更多信息
+    tbar = tqdm(dataloader, 
+                desc=f"Epoch {epoch+1}/{total_epochs}",
+                bar_format='{l_bar}{bar:30}{r_bar}',
+                ncols=100)
     
     for batch in tbar:
         try:
@@ -124,11 +128,12 @@ def train_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, optimizer, 
             epoch_gsl_loss += gsl_loss.item()
             epoch_total_loss += total_loss.item()
             
-            # 更新进度条
+            # 更新进度条，显示更多信息
             tbar.set_postfix({
-                'GDM Loss': f"{gdm_loss.item():.4f}",
-                'GSL Loss': f"{gsl_loss.item():.4f}",
-                'Total Loss': f"{total_loss.item():.4f}"
+                'GDM': f"{gdm_loss.item():.4f}",
+                'GSL': f"{gsl_loss.item():.4f}",
+                'Total': f"{total_loss.item():.4f}",
+                'LR': f"{optimizer.param_groups[0]['lr']:.6f}"
             })
             
             if torch.cuda.is_available():
@@ -163,7 +168,13 @@ def valid_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, device, arg
     epoch_gsl_loss = 0.0
     epoch_total_loss = 0.0
     
-    for batch in dataloader:
+    # 为验证集也添加进度条
+    tbar = tqdm(dataloader, 
+                desc="Validating",
+                bar_format='{l_bar}{bar:30}{r_bar}',
+                ncols=100)
+    
+    for batch in tbar:
         lr = batch['lr'].to(device)
         hr = batch['hr'].to(device)
         source_pos = batch['source_pos'].to(device)
@@ -177,6 +188,13 @@ def valid_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, device, arg
         epoch_gdm_loss += gdm_loss.item()
         epoch_gsl_loss += gsl_loss.item()
         epoch_total_loss += total_loss.item()
+        
+        # 更新验证进度条
+        tbar.set_postfix({
+            'GDM': f"{gdm_loss.item():.4f}",
+            'GSL': f"{gsl_loss.item():.4f}",
+            'Total': f"{total_loss.item():.4f}"
+        })
     
     return epoch_gdm_loss / len(dataloader), epoch_gsl_loss / len(dataloader), epoch_total_loss / len(dataloader)
 
