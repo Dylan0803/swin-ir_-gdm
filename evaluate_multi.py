@@ -121,18 +121,18 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
         lr: 低分辨率输入 [1, H, W]
         hr: 高分辨率真值 [1, H, W]
         gdm_out: 模型GDM输出 [1, H, W]
-        gsl_out: 模型GSL输出 [2]
-        source_pos: 真实泄漏源位置 [2]
-        hr_max_pos: HR中最大浓度位置 [2]
+        gsl_out: 模型GSL输出 [1, 2]
+        source_pos: 真实泄漏源位置 [1, 2]
+        hr_max_pos: HR中最大浓度位置 [1, 2]
         save_path: 保存路径
     """
     # 转换为numpy数组
     lr = lr.squeeze().cpu().numpy()
     hr = hr.squeeze().cpu().numpy()
     gdm_out = gdm_out.squeeze().cpu().numpy()
-    gsl_out = gsl_out.cpu().numpy()
-    source_pos = source_pos.cpu().numpy()
-    hr_max_pos = hr_max_pos.cpu().numpy()
+    gsl_out = gsl_out.squeeze().cpu().numpy()  # 移除batch维度
+    source_pos = source_pos.squeeze().cpu().numpy()  # 移除batch维度
+    hr_max_pos = hr_max_pos.squeeze().cpu().numpy()  # 移除batch维度
     
     # 计算差异图
     diff = hr - gdm_out
