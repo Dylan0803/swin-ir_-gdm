@@ -131,8 +131,14 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     hr = hr.squeeze().cpu().numpy()
     gdm_out = gdm_out.squeeze().cpu().numpy()
     
+    # 添加打印语句检查数值范围
+    print("LR range:", np.min(lr), np.max(lr))
+    print("HR range:", np.min(hr), np.max(hr))
+    print("SR range:", np.min(gdm_out), np.max(gdm_out))
+    
     # 计算差异图
     diff = hr - gdm_out
+    print("Diff range:", np.min(diff), np.max(diff))
     
     # 创建图形
     fig = plt.figure(figsize=(20, 5))
@@ -213,9 +219,15 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
         source_pos = batch['source_pos'].to(device)
         hr_max_pos = batch['hr_max_pos'].to(device)
         
+        # 添加打印语句检查输入数据
+        print("Input LR range:", torch.min(lr).item(), torch.max(lr).item())
+        
         # 模型推理
         with torch.no_grad():
             gdm_out, gsl_out = model(lr)
+            
+        # 添加打印语句检查模型输出
+        print("Model output range:", torch.min(gdm_out).item(), torch.max(gdm_out).item())
         
         # 可视化结果
         save_path = os.path.join(save_dir, f'inference_result_{i+1}.png')
