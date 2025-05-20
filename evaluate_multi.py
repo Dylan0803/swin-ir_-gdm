@@ -126,13 +126,13 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
         hr_max_pos: HR中最大浓度位置 [1, 2]
         save_path: 保存路径
     """
-    # 转换为numpy数组
+    # 转换为numpy数组并移除batch维度
     lr = lr.squeeze().cpu().numpy()
     hr = hr.squeeze().cpu().numpy()
     gdm_out = gdm_out.squeeze().cpu().numpy()
-    gsl_out = gsl_out.squeeze().cpu().numpy()  # 移除batch维度
-    source_pos = source_pos.squeeze().cpu().numpy()  # 移除batch维度
-    hr_max_pos = hr_max_pos.squeeze().cpu().numpy()  # 移除batch维度
+    gsl_out = gsl_out.squeeze().cpu().numpy()
+    source_pos = source_pos.squeeze().cpu().numpy()
+    hr_max_pos = hr_max_pos.squeeze().cpu().numpy()
     
     # 计算差异图
     diff = hr - gdm_out
@@ -172,28 +172,24 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     plt.xlabel('X')
     plt.ylabel('Y')
     
-    # 在第二个和第三个子图上标记位置
     # 将归一化坐标转换回原始坐标
     gsl_out = gsl_out * 95.0
     source_pos = source_pos * 95.0
     hr_max_pos = hr_max_pos * 95.0
     
-    # 在HR图上标记真实位置
+    # 在HR图上标记真实泄漏源位置（红色五角星）
     plt.subplot(142)
-    plt.plot(source_pos[0], source_pos[1], 'r*', markersize=10, label='True Source')
-    plt.plot(hr_max_pos[0], hr_max_pos[1], 'b*', markersize=10, label='Max Concentration')
+    plt.plot(source_pos[0], source_pos[1], 'r*', markersize=15, label='True Source')
     plt.legend()
     
-    # 在SR图上标记预测位置
+    # 在SR图上标记预测的泄漏源位置（绿色五角星）
     plt.subplot(143)
-    plt.plot(gsl_out[0], gsl_out[1], 'g*', markersize=10, label='Predicted Source')
-    plt.plot(hr_max_pos[0], hr_max_pos[1], 'b*', markersize=10, label='Max Concentration')
+    plt.plot(gsl_out[0], gsl_out[1], 'g*', markersize=15, label='Predicted Source')
     plt.legend()
     
     # 添加位置信息文本
     info_text = f'True Source: ({source_pos[0]:.1f}, {source_pos[1]:.1f})\n'
-    info_text += f'Predicted: ({gsl_out[0]:.1f}, {gsl_out[1]:.1f})\n'
-    info_text += f'Max Conc: ({hr_max_pos[0]:.1f}, {hr_max_pos[1]:.1f})'
+    info_text += f'Predicted: ({gsl_out[0]:.1f}, {gsl_out[1]:.1f})'
     plt.text(0.02, 0.98, info_text, transform=plt.gca().transAxes, 
              verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
