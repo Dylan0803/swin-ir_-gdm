@@ -190,7 +190,7 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
         num_samples: 要推理的样本数量
         use_valid: 是否使用验证集
     """
-    device = torch.device("cuda" if torch.cuda.is_available() else "device")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     model.eval()
     
@@ -241,9 +241,7 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
             print("GDM output shape:", gdm_out.shape)
             print("GSL output shape:", gsl_out.shape)
             print("GDM output type:", gdm_out.dtype)
-            
-        # 添加打印语句检查模型输出
-        print("Model output range:", torch.min(gdm_out).item(), torch.max(gdm_out).item())
+            print("Model output range:", torch.min(gdm_out).item(), torch.max(gdm_out).item())
         
         # 可视化结果
         save_path = os.path.join(save_dir, f'inference_result_{i+1}.png')
