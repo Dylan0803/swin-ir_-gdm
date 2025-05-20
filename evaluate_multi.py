@@ -222,7 +222,7 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
     # 加载数据
     if use_valid:
         # 使用验证集
-        _, valid_dataset = generate_train_valid_dataset(data_path, valid_ratio=0.2, shuffle=True)
+        _, valid_dataset = generate_train_valid_dataset(data_path, train_ratio=0.8, shuffle=True)
         dataset = valid_dataset
     else:
         # 使用整个数据集
