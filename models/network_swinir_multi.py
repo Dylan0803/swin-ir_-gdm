@@ -798,8 +798,6 @@ class SwinIRMulti(nn.Module):
             gdm_out = self.lrelu(self.conv_up2(torch.nn.functional.interpolate(gdm_out, scale_factor=1.5, mode='nearest')))
             gdm_out = self.lrelu(self.conv_up3(torch.nn.functional.interpolate(gdm_out, scale_factor=2, mode='nearest')))
         gdm_out = self.conv_last(self.lrelu(self.conv_hr(gdm_out)))
-        # 添加ReLU确保输出为非负值
-        gdm_out = F.relu(gdm_out)
         
         # GSL分支 - 泄漏源定位
         gsl_out = self.gsl_branch(shared_features)
