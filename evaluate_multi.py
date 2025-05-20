@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
 import pandas as pd
+import h5py
+import argparse
 
 def evaluate_model(model, dataloader, device):
     """
@@ -111,11 +113,150 @@ def plot_metrics(metrics, save_dir):
     plt.savefig(os.path.join(save_dir, 'evaluation_metrics.png'))
     plt.close()
 
-def main():
-    # 设置参数
-    model_path = "experiments/your_experiment/model_name/best_model.pth"  # 修改为你的模型路径
-    data_path = "path/to/your/dataset.h5"  # 修改为你的数据集路径
+def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path):
+    """
+    可视化推理结果
+    
+    参数:
+        lr: 低分辨率输入 [1, H, W]
+        hr: 高分辨率真值 [1, H, W]
+        gdm_out: 模型GDM输出 [1, H, W]
+        gsl_out: 模型GSL输出 [2]
+        source_pos: 真实泄漏源位置 [2]
+        hr_max_pos: HR中最大浓度位置 [2]
+        save_path: 保存路径
+    """
+    # 转换为numpy数组
+    lr = lr.squeeze().cpu().numpy()
+    hr = hr.squeeze().cpu().numpy()
+    gdm_out = gdm_out.squeeze().cpu().numpy()
+    gsl_out = gsl_out.cpu().numpy()
+    source_pos = source_pos.cpu().numpy()
+    hr_max_pos = hr_max_pos.cpu().numpy()
+    
+    # 创建图形
+    fig = plt.figure(figsize=(15, 5))
+    
+    # 1. 低分辨率输入
+    plt.subplot(131)
+    plt.imshow(lr, cmap='viridis')
+    plt.colorbar(label='Concentration')
+    plt.title('Low Resolution Input')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    
+    # 2. 高分辨率真值
+    plt.subplot(132)
+    plt.imshow(hr, cmap='viridis')
+    plt.colorbar(label='Concentration')
+    plt.title('High Resolution Ground Truth')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    
+    # 3. 模型输出
+    plt.subplot(133)
+    plt.imshow(gdm_out, cmap='viridis')
+    plt.colorbar(label='Concentration')
+    plt.title('Model Output')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    
+    # 在第三个子图上标记位置
+    # 将归一化坐标转换回原始坐标
+    gsl_out = gsl_out * 95.0
+    source_pos = source_pos * 95.0
+    hr_max_pos = hr_max_pos * 95.0
+    
+    plt.plot(gsl_out[0], gsl_out[1], 'r*', markersize=10, label='Predicted Source')
+    plt.plot(source_pos[0], source_pos[1], 'g*', markersize=10, label='True Source')
+    plt.plot(hr_max_pos[0], hr_max_pos[1], 'b*', markersize=10, label='Max Concentration')
+    plt.legend()
+    
+    # 添加位置信息文本
+    info_text = f'Predicted: ({gsl_out[0]:.1f}, {gsl_out[1]:.1f})\n'
+    info_text += f'True: ({source_pos[0]:.1f}, {source_pos[1]:.1f})\n'
+    info_text += f'Max: ({hr_max_pos[0]:.1f}, {hr_max_pos[1]:.1f})'
+    plt.text(0.02, 0.98, info_text, transform=plt.gca().transAxes, 
+             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
+    """
+    使用模型进行推理并可视化结果
+    
+    参数:
+        model: 训练好的模型
+        data_path: 数据文件路径
+        save_dir: 结果保存目录
+        num_samples: 要推理的样本数量
+        use_valid: 是否使用验证集
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+    model.eval()
+    
+    # 创建保存目录
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # 加载数据
+    if use_valid:
+        # 使用验证集
+        _, valid_dataset = generate_train_valid_dataset(data_path, valid_ratio=0.2, shuffle=True)
+        dataset = valid_dataset
+    else:
+        # 使用整个数据集
+        dataset = MultiTaskDataset(data_path, shuffle=True)
+    
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    
+    # 选择前num_samples个样本进行推理
+    for i, batch in enumerate(tqdm(dataloader, desc="Inferring")):
+        if i >= num_samples:
+            break
+            
+        # 数据预处理
+        lr = batch['lr'].to(device)
+        hr = batch['hr'].to(device)
+        source_pos = batch['source_pos'].to(device)
+        hr_max_pos = batch['hr_max_pos'].to(device)
+        
+        # 模型推理
+        with torch.no_grad():
+            gdm_out, gsl_out = model(lr)
+        
+        # 可视化结果
+        save_path = os.path.join(save_dir, f'inference_result_{i+1}.png')
+        visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path)
+        
+        # 计算评估指标
+        mse = torch.mean((gdm_out - hr) ** 2)
+        psnr = 20 * torch.log10(1.0 / torch.sqrt(mse))
+        position_error = torch.sqrt(torch.sum((gsl_out - source_pos) ** 2))
+        
+        print(f"\n样本 {i+1} 的评估结果:")
+        print(f"PSNR: {psnr.item():.2f} dB")
+        print(f"位置误差: {position_error.item():.4f}")
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='模型推理和可视化')
+    parser.add_argument('--model_path', type=str, required=True,
+                      help='训练好的模型路径')
+    parser.add_argument('--data_path', type=str, required=True,
+                      help='数据集路径')
+    parser.add_argument('--save_dir', type=str, default='inference_results',
+                      help='结果保存目录')
+    parser.add_argument('--num_samples', type=int, default=5,
+                      help='要推理的样本数量')
+    parser.add_argument('--use_valid', action='store_true',
+                      help='是否使用验证集进行推理')
+    return parser.parse_args()
+
+def main():
+    # 解析命令行参数
+    args = parse_args()
     
     # 加载模型
     model = SwinIRMulti(
@@ -131,31 +272,15 @@ def main():
         img_range=1.,
         upsampler='nearest+conv',
         resi_connection='1conv'
-    ).to(device)
+    )
     
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
+    model.load_state_dict(torch.load(args.model_path, map_location='cpu'))
     
-    # 加载测试数据
-    _, test_set = generate_train_valid_dataset(data_path, train_ratio=0.8, shuffle=True)
-    test_loader = DataLoader(test_set, batch_size=64, shuffle=False, num_workers=0)
+    # 进行推理和可视化
+    infer_model(model, args.data_path, args.save_dir, 
+               num_samples=args.num_samples, use_valid=args.use_valid)
     
-    # 评估模型
-    results, metrics = evaluate_model(model, test_loader, device)
-    
-    # 打印结果
-    print("\n=== 模型评估结果 ===")
-    print(f"GDM PSNR: {results['GDM_PSNR']:.2f} dB")
-    print(f"GDM SSIM: {results['GDM_SSIM']:.4f}")
-    print(f"GSL Position Error: {results['GSL_Position_Error']:.4f}")
-    print(f"GSL Max Position Error: {results['GSL_MaxPos_Error']:.4f}")
-    
-    # 保存结果
-    save_dir = os.path.dirname(model_path)
-    pd.DataFrame([results]).to_csv(os.path.join(save_dir, 'evaluation_results.csv'), index=False)
-    plot_metrics(metrics, save_dir)
-    
-    print(f"\n评估结果已保存至: {save_dir}")
+    print(f"\n推理结果已保存至: {args.save_dir}")
 
 if __name__ == '__main__':
     main()
