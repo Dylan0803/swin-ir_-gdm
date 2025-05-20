@@ -302,14 +302,29 @@ def main():
     # 检查模型加载
     model = SwinIRMulti()
     checkpoint = torch.load(args.model_path, map_location='cpu')
+    
+    # 打印checkpoint的键
     print("Checkpoint keys:", checkpoint.keys())
-    print("Model state dict keys:", checkpoint['model'].keys())
-    model.load_state_dict(checkpoint['model'])
+    
+    # 根据实际的键结构加载模型
+    if 'model' in checkpoint:
+        model.load_state_dict(checkpoint['model'])
+    elif 'state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['state_dict'])
+    else:
+        # 如果checkpoint直接就是state_dict
+        model.load_state_dict(checkpoint)
+    
     model.eval()
     
-    # 进行推理和可视化
+    # 检查模型是否成功加载
+    print("Model loaded successfully")
+    print("Model device:", next(model.parameters()).device)
+    print("Model training mode:", model.training)
+    
+    # 进行推理
     infer_model(model, args.data_path, args.save_dir, 
-               num_samples=args.num_samples, use_valid=args.use_valid)
+                args.num_samples, args.use_valid)
     
     print(f"\n推理结果已保存至: {args.save_dir}")
 
