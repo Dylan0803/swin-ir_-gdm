@@ -131,18 +131,15 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     lr = lr.squeeze().cpu().numpy()
     hr = hr.squeeze().cpu().numpy()
     gdm_out = gdm_out.squeeze().cpu().numpy()
-    gsl_out = gsl_out.squeeze().cpu().numpy()
-    source_pos = source_pos.squeeze().cpu().numpy()
-    hr_max_pos = hr_max_pos.squeeze().cpu().numpy()
     
-    # 检查数据范围
-    print("Before visualization:")
-    print("LR stats:", np.min(lr), np.max(lr), np.mean(lr))
-    print("HR stats:", np.min(hr), np.max(hr), np.mean(hr))
-    print("GDM stats:", np.min(gdm_out), np.max(gdm_out), np.mean(gdm_out))
+    # 添加打印语句检查数值范围
+    print("LR range:", np.min(lr), np.max(lr))
+    print("HR range:", np.min(hr), np.max(hr))
+    print("SR range:", np.min(gdm_out), np.max(gdm_out))
     
     # 计算差异图
     diff = hr - gdm_out
+    print("Diff range:", np.min(diff), np.max(diff))
     
     # 创建图形
     fig = plt.figure(figsize=(20, 5))
@@ -182,6 +179,12 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
+
+    # 检查数据范围
+    print("Before visualization:")
+    print("LR stats:", torch.min(lr).item(), torch.max(lr).item(), torch.mean(lr).item())
+    print("HR stats:", torch.min(hr).item(), torch.max(hr).item(), torch.mean(hr).item())
+    print("GDM stats:", torch.min(gdm_out).item(), torch.max(gdm_out).item(), torch.mean(gdm_out).item())
 
 def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
     """
@@ -299,29 +302,14 @@ def main():
     # 检查模型加载
     model = SwinIRMulti()
     checkpoint = torch.load(args.model_path, map_location='cpu')
-    
-    # 打印checkpoint的键
     print("Checkpoint keys:", checkpoint.keys())
-    
-    # 根据实际的键结构加载模型
-    if 'model' in checkpoint:
-        model.load_state_dict(checkpoint['model'])
-    elif 'state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['state_dict'])
-    else:
-        # 如果checkpoint直接就是state_dict
-        model.load_state_dict(checkpoint)
-    
+    print("Model state dict keys:", checkpoint['model'].keys())
+    model.load_state_dict(checkpoint['model'])
     model.eval()
     
-    # 检查模型是否成功加载
-    print("Model loaded successfully")
-    print("Model device:", next(model.parameters()).device)
-    print("Model training mode:", model.training)
-    
-    # 进行推理
+    # 进行推理和可视化
     infer_model(model, args.data_path, args.save_dir, 
-                args.num_samples, args.use_valid)
+               num_samples=args.num_samples, use_valid=args.use_valid)
     
     print(f"\n推理结果已保存至: {args.save_dir}")
 
