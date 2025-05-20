@@ -134,11 +134,14 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     source_pos = source_pos.cpu().numpy()
     hr_max_pos = hr_max_pos.cpu().numpy()
     
+    # 计算差异图
+    diff = hr - gdm_out
+    
     # 创建图形
-    fig = plt.figure(figsize=(15, 5))
+    fig = plt.figure(figsize=(20, 5))
     
     # 1. 低分辨率输入
-    plt.subplot(131)
+    plt.subplot(141)
     plt.imshow(lr, cmap='viridis')
     plt.colorbar(label='Concentration')
     plt.title('Low Resolution Input')
@@ -146,7 +149,7 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     plt.ylabel('Y')
     
     # 2. 高分辨率真值
-    plt.subplot(132)
+    plt.subplot(142)
     plt.imshow(hr, cmap='viridis')
     plt.colorbar(label='Concentration')
     plt.title('High Resolution Ground Truth')
@@ -154,28 +157,43 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     plt.ylabel('Y')
     
     # 3. 模型输出
-    plt.subplot(133)
+    plt.subplot(143)
     plt.imshow(gdm_out, cmap='viridis')
     plt.colorbar(label='Concentration')
-    plt.title('Model Output')
+    plt.title('Model Output (SR)')
     plt.xlabel('X')
     plt.ylabel('Y')
     
-    # 在第三个子图上标记位置
+    # 4. 差异图
+    plt.subplot(144)
+    plt.imshow(diff, cmap='RdBu_r', vmin=-0.5, vmax=0.5)
+    plt.colorbar(label='Difference (HR-SR)')
+    plt.title('Difference Map (HR-SR)')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    
+    # 在第二个和第三个子图上标记位置
     # 将归一化坐标转换回原始坐标
     gsl_out = gsl_out * 95.0
     source_pos = source_pos * 95.0
     hr_max_pos = hr_max_pos * 95.0
     
-    plt.plot(gsl_out[0], gsl_out[1], 'r*', markersize=10, label='Predicted Source')
-    plt.plot(source_pos[0], source_pos[1], 'g*', markersize=10, label='True Source')
+    # 在HR图上标记真实位置
+    plt.subplot(142)
+    plt.plot(source_pos[0], source_pos[1], 'r*', markersize=10, label='True Source')
+    plt.plot(hr_max_pos[0], hr_max_pos[1], 'b*', markersize=10, label='Max Concentration')
+    plt.legend()
+    
+    # 在SR图上标记预测位置
+    plt.subplot(143)
+    plt.plot(gsl_out[0], gsl_out[1], 'g*', markersize=10, label='Predicted Source')
     plt.plot(hr_max_pos[0], hr_max_pos[1], 'b*', markersize=10, label='Max Concentration')
     plt.legend()
     
     # 添加位置信息文本
-    info_text = f'Predicted: ({gsl_out[0]:.1f}, {gsl_out[1]:.1f})\n'
-    info_text += f'True: ({source_pos[0]:.1f}, {source_pos[1]:.1f})\n'
-    info_text += f'Max: ({hr_max_pos[0]:.1f}, {hr_max_pos[1]:.1f})'
+    info_text = f'True Source: ({source_pos[0]:.1f}, {source_pos[1]:.1f})\n'
+    info_text += f'Predicted: ({gsl_out[0]:.1f}, {gsl_out[1]:.1f})\n'
+    info_text += f'Max Conc: ({hr_max_pos[0]:.1f}, {hr_max_pos[1]:.1f})'
     plt.text(0.02, 0.98, info_text, transform=plt.gca().transAxes, 
              verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
@@ -246,7 +264,7 @@ def parse_args():
                       help='训练好的模型路径')
     parser.add_argument('--data_path', type=str, required=True,
                       help='数据集路径')
-    parser.add_argument('--save_dir', type=str, default='inference_results',
+    parser.add_argument('--save_dir', type=str, required=True,
                       help='结果保存目录')
     parser.add_argument('--num_samples', type=int, default=5,
                       help='要推理的样本数量')
