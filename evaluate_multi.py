@@ -140,51 +140,53 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     # 创建图形
     fig = plt.figure(figsize=(20, 5))
     
-    # 1. 高分辨率真值
+    # 1. 低分辨率输入
     plt.subplot(141)
-    im1 = plt.imshow(hr, cmap='viridis')
+    im1 = plt.imshow(lr, cmap='viridis')
     plt.colorbar(im1, label='Concentration')
-    plt.title('High Resolution Ground Truth')
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    
-    # 2. 模型输出
-    plt.subplot(142)
-    im2 = plt.imshow(gdm_out, cmap='viridis')
-    plt.colorbar(im2, label='Concentration')
-    plt.title('Model Output (SR)')
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    
-    # 3. 差异图
-    plt.subplot(143)
-    im3 = plt.imshow(diff, cmap='RdBu_r', vmin=-0.5, vmax=0.5)
-    plt.colorbar(im3, label='Difference (HR-SR)')
-    plt.title('Difference Map (HR-SR)')
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    
-    # 4. 低分辨率输入
-    plt.subplot(144)
-    im4 = plt.imshow(lr, cmap='viridis')
-    plt.colorbar(im4, label='Concentration')
     plt.title('Low Resolution Input')
     plt.xlabel('X')
     plt.ylabel('Y')
     
+    # 2. 高分辨率真值
+    plt.subplot(142)
+    im2 = plt.imshow(hr, cmap='viridis')
+    plt.colorbar(im2, label='Concentration')
+    plt.title('High Resolution Ground Truth')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    
+    # 3. 模型输出
+    plt.subplot(143)
+    im3 = plt.imshow(gdm_out, cmap='viridis')
+    plt.colorbar(im3, label='Concentration')
+    plt.title('Model Output (SR)')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    
+    # 4. 差异图
+    plt.subplot(144)
+    im4 = plt.imshow(diff, cmap='RdBu_r', vmin=-0.5, vmax=0.5)
+    plt.colorbar(im4, label='Difference (HR-SR)')
+    plt.title('Difference Map (HR-SR)')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    
     # 将归一化坐标转换回原始坐标
-    gsl_out = gsl_out * 95.0
-    source_pos = source_pos * 95.0
+    gsl_out = gsl_out * 95.0  # 反归一化
+    source_pos = source_pos * 95.0  # 反归一化
     
     # 在HR图上标记真实泄漏源位置（红色五角星）
-    plt.subplot(141)
-    plt.plot(source_pos[0], source_pos[1], 'r*', markersize=15, label='True Source')
-    plt.legend()
+    plt.subplot(142)
+    plt.plot(source_pos[0], source_pos[1], 'r*', markersize=10, 
+             alpha=0.7, label='True Source', markeredgecolor='black', markeredgewidth=1)
+    plt.legend(loc='upper right')
     
     # 在SR图上标记预测的泄漏源位置（绿色五角星）
-    plt.subplot(142)
-    plt.plot(gsl_out[0], gsl_out[1], 'g*', markersize=15, label='Predicted Source')
-    plt.legend()
+    plt.subplot(143)
+    plt.plot(gsl_out[0], gsl_out[1], 'g*', markersize=10, 
+             alpha=0.7, label='Predicted Source', markeredgecolor='black', markeredgewidth=1)
+    plt.legend(loc='upper right')
     
     # 添加位置信息文本
     info_text = f'True Source: ({source_pos[0]:.1f}, {source_pos[1]:.1f})\n'
