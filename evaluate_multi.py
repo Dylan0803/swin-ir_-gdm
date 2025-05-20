@@ -130,9 +130,6 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     lr = lr.squeeze().cpu().numpy()
     hr = hr.squeeze().cpu().numpy()
     gdm_out = gdm_out.squeeze().cpu().numpy()
-    gsl_out = gsl_out.squeeze().cpu().numpy()
-    source_pos = source_pos.squeeze().cpu().numpy()
-    hr_max_pos = hr_max_pos.squeeze().cpu().numpy()
     
     # 计算差异图
     diff = hr - gdm_out
@@ -171,28 +168,6 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     plt.title('Difference Map (HR-SR)')
     plt.xlabel('X')
     plt.ylabel('Y')
-    
-    # 将归一化坐标转换回原始坐标
-    gsl_out = gsl_out * 95.0  # 反归一化
-    source_pos = source_pos * 95.0  # 反归一化
-    
-    # 在HR图上标记真实泄漏源位置（红色五角星）
-    plt.subplot(142)
-    plt.plot(source_pos[0], source_pos[1], 'r*', markersize=10, 
-             alpha=0.7, label='True Source', markeredgecolor='black', markeredgewidth=1)
-    plt.legend(loc='upper right')
-    
-    # 在SR图上标记预测的泄漏源位置（绿色五角星）
-    plt.subplot(143)
-    plt.plot(gsl_out[0], gsl_out[1], 'g*', markersize=10, 
-             alpha=0.7, label='Predicted Source', markeredgecolor='black', markeredgewidth=1)
-    plt.legend(loc='upper right')
-    
-    # 添加位置信息文本
-    info_text = f'True Source: ({source_pos[0]:.1f}, {source_pos[1]:.1f})\n'
-    info_text += f'Predicted: ({gsl_out[0]:.1f}, {gsl_out[1]:.1f})'
-    plt.text(0.02, 0.98, info_text, transform=plt.gca().transAxes, 
-             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
