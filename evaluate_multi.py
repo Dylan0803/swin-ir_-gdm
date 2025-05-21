@@ -296,22 +296,43 @@ def parse_args():
     return parser.parse_args()
 
 def main():
-    # 解析命令行参数
     args = parse_args()
     
-    # 检查模型加载
-    model = SwinIRMulti()
-    checkpoint = torch.load(args.model_path, map_location='cpu')
-    print("Checkpoint keys:", checkpoint.keys())
-    print("Model state dict keys:", checkpoint['model'].keys())
-    model.load_state_dict(checkpoint['model'])
+    # 设置设备
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # 创建模型
+    model = SwinIRMulti(
+        img_size=args.img_size,
+        in_chans=args.in_chans,
+        upscale=args.upscale,
+        window_size=args.window_size,
+        img_range=args.img_range,
+        depths=args.depths,
+        embed_dim=args.embed_dim,
+        num_heads=args.num_heads,
+        mlp_ratio=args.mlp_ratio,
+        upsampler=args.upsampler
+    )
+    
+    # 加载模型
+    checkpoint = torch.load(args.model_path, map_location=device)
+    print("Checkpoint keys:", checkpoint.keys())  # 打印检查点的键
+    
+    # 根据实际的键加载模型
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    elif 'model' in checkpoint:
+        model.load_state_dict(checkpoint['model'])
+    else:
+        # 如果检查点直接是模型状态字典
+        model.load_state_dict(checkpoint)
+    
+    model = model.to(device)
     model.eval()
     
-    # 进行推理和可视化
-    infer_model(model, args.data_path, args.save_dir, 
-               num_samples=args.num_samples, use_valid=args.use_valid)
-    
-    print(f"\n推理结果已保存至: {args.save_dir}")
+    # 进行推理
+    infer_model(model, args.data_path, args.save_dir, args.num_samples, args.use_valid)
 
 if __name__ == '__main__':
     main()
