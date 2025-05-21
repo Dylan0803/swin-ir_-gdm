@@ -166,7 +166,7 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
     # 创建保存目录
     os.makedirs(save_dir, exist_ok=True)
     
-    # 加载数据集 - 移除 split 参数
+    # 加载数据集
     dataset = MultiTaskDataset(data_path)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
     
@@ -178,10 +178,19 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
     total_position_error = 0
     
     # 处理指定数量的样本
-    for i, (lr, hr, source_pos) in enumerate(dataloader):
+    for i, batch in enumerate(dataloader):
         if i >= num_samples:
             break
             
+        # 解包数据
+        if isinstance(batch, (list, tuple)):
+            lr, hr, source_pos = batch
+        else:
+            # 如果batch是字典，则按键获取数据
+            lr = batch['lr']
+            hr = batch['hr']
+            source_pos = batch['source_pos']
+        
         # 将数据移到设备上
         lr = lr.to(device)
         hr = hr.to(device)
