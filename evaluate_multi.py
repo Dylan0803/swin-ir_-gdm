@@ -126,12 +126,6 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     # 计算差值图
     diff = hr - gdm_out
     
-    # 打印统计信息（使用numpy函数）
-    print("LR stats:", np.min(lr), np.max(lr), np.mean(lr))
-    print("HR stats:", np.min(hr), np.max(hr), np.mean(hr))
-    print("SR stats:", np.min(gdm_out), np.max(gdm_out), np.mean(gdm_out))
-    print("Diff stats:", np.min(diff), np.max(diff), np.mean(diff))
-    
     # 创建图像
     fig, axes = plt.subplots(2, 2, figsize=(12, 12))
     fig.suptitle('Gas Concentration Distribution', fontsize=16)
@@ -166,11 +160,6 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     # 保存图像
     plt.savefig(save_path)
     plt.close()
-    
-    # 打印泄漏源位置信息
-    print(f"True source position: {source_pos * 95.0}")  # 反归一化
-    print(f"Predicted source position: {gsl_out * 95.0}")  # 反归一化
-    print(f"HR max position: {hr_max_pos * 95.0}")  # 反归一化
 
 def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
     """
@@ -223,9 +212,6 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
         hr = batch['hr'].to(device)
         source_pos = batch['source_pos'].to(device)
         hr_max_pos = batch['hr_max_pos'].to(device)
-        
-        # 添加打印语句检查输入数据
-        print("Input LR range:", torch.min(lr).item(), torch.max(lr).item())
         
         # 添加中间结果检查
         with torch.no_grad():
