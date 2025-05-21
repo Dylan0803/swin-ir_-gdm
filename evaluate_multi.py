@@ -115,76 +115,62 @@ def plot_metrics(metrics, save_dir):
     plt.close()
 
 def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path):
-    """
-    可视化推理结果
-    
-    参数:
-        lr: 低分辨率输入 [1, H, W]
-        hr: 高分辨率真值 [1, H, W]
-        gdm_out: 模型GDM输出 [1, H, W]
-        gsl_out: 模型GSL输出 [1, 2]
-        source_pos: 真实泄漏源位置 [1, 2]
-        hr_max_pos: HR中最大浓度位置 [1, 2]
-        save_path: 保存路径
-    """
     # 转换为numpy数组并移除batch维度
     lr = lr.squeeze().cpu().numpy()
     hr = hr.squeeze().cpu().numpy()
     gdm_out = gdm_out.squeeze().cpu().numpy()
+    gsl_out = gsl_out.squeeze().cpu().numpy()
+    source_pos = source_pos.squeeze().cpu().numpy()
+    hr_max_pos = hr_max_pos.squeeze().cpu().numpy()
     
-    # 添加打印语句检查数值范围
-    print("LR range:", np.min(lr), np.max(lr))
-    print("HR range:", np.min(hr), np.max(hr))
-    print("SR range:", np.min(gdm_out), np.max(gdm_out))
-    
-    # 计算差异图
+    # 计算差值图
     diff = hr - gdm_out
-    print("Diff range:", np.min(diff), np.max(diff))
     
-    # 创建图形
-    fig = plt.figure(figsize=(20, 5))
+    # 打印统计信息（使用numpy函数）
+    print("LR stats:", np.min(lr), np.max(lr), np.mean(lr))
+    print("HR stats:", np.min(hr), np.max(hr), np.mean(hr))
+    print("SR stats:", np.min(gdm_out), np.max(gdm_out), np.mean(gdm_out))
+    print("Diff stats:", np.min(diff), np.max(diff), np.mean(diff))
     
-    # 1. 低分辨率输入
-    plt.subplot(141)
-    im1 = plt.imshow(lr, cmap='viridis')
-    plt.colorbar(im1, label='Concentration')
-    plt.title('Low Resolution Input')
-    plt.xlabel('X')
-    plt.ylabel('Y')
+    # 创建图像
+    fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+    fig.suptitle('Gas Concentration Distribution', fontsize=16)
     
-    # 2. 高分辨率真值
-    plt.subplot(142)
-    im2 = plt.imshow(hr, cmap='viridis')
-    plt.colorbar(im2, label='Concentration')
-    plt.title('High Resolution Ground Truth')
-    plt.xlabel('X')
-    plt.ylabel('Y')
+    # 低分辨率输入
+    im0 = axes[0, 0].imshow(lr, cmap='viridis')
+    axes[0, 0].set_title('Low Resolution Input')
+    axes[0, 0].axis('off')
+    plt.colorbar(im0, ax=axes[0, 0])
     
-    # 3. 模型输出
-    plt.subplot(143)
-    im3 = plt.imshow(gdm_out, cmap='viridis')
-    plt.colorbar(im3, label='Concentration')
-    plt.title('Model Output (SR)')
-    plt.xlabel('X')
-    plt.ylabel('Y')
+    # 高分辨率真实值
+    im1 = axes[0, 1].imshow(hr, cmap='viridis')
+    axes[0, 1].set_title('High Resolution Ground Truth')
+    axes[0, 1].axis('off')
+    plt.colorbar(im1, ax=axes[0, 1])
     
-    # 4. 差异图
-    plt.subplot(144)
-    im4 = plt.imshow(diff, cmap='RdBu_r', vmin=-0.5, vmax=0.5)
-    plt.colorbar(im4, label='Difference (HR-SR)')
-    plt.title('Difference Map (HR-SR)')
-    plt.xlabel('X')
-    plt.ylabel('Y')
+    # 模型输出（超分辨率）
+    im2 = axes[1, 0].imshow(gdm_out, cmap='viridis')
+    axes[1, 0].set_title('Super Resolution Output')
+    axes[1, 0].axis('off')
+    plt.colorbar(im2, ax=axes[1, 0])
     
+    # 差值图
+    im3 = axes[1, 1].imshow(diff, cmap='RdBu_r', vmin=-0.5, vmax=0.5)
+    axes[1, 1].set_title('Difference (HR-SR)')
+    axes[1, 1].axis('off')
+    plt.colorbar(im3, ax=axes[1, 1])
+    
+    # 调整布局
     plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    # 保存图像
+    plt.savefig(save_path)
     plt.close()
-
-    # 检查数据范围
-    print("Before visualization:")
-    print("LR stats:", torch.min(lr).item(), torch.max(lr).item(), torch.mean(lr).item())
-    print("HR stats:", torch.min(hr).item(), torch.max(hr).item(), torch.mean(hr).item())
-    print("GDM stats:", torch.min(gdm_out).item(), torch.max(gdm_out).item(), torch.mean(gdm_out).item())
+    
+    # 打印泄漏源位置信息
+    print(f"True source position: {source_pos * 95.0}")  # 反归一化
+    print(f"Predicted source position: {gsl_out * 95.0}")  # 反归一化
+    print(f"HR max position: {hr_max_pos * 95.0}")  # 反归一化
 
 def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
     """
