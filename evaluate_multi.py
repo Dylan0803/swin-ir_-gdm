@@ -10,6 +10,7 @@ import pandas as pd
 import h5py
 import argparse
 import torch.nn as nn
+import torch.nn.functional as F
 
 def evaluate_model(model, dataloader, device):
     """
@@ -162,96 +163,59 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     plt.close()
 
 def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
-    """
-    使用模型进行推理并可视化结果
-    
-    参数:
-        model: 训练好的模型
-        data_path: 数据文件路径
-        save_dir: 结果保存目录
-        num_samples: 要推理的样本数量
-        use_valid: 是否使用验证集
-    """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    model.eval()
-    
-    # 添加模型状态检查
-    print("Model device:", next(model.parameters()).device)
-    print("Model training mode:", model.training)
-    
-    # 检查模型结构
-    print("Model structure:", model)
-    
-    # 检查模型权重
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            print(f"{name}: {param.data.abs().mean().item()}")
-    
     # 创建保存目录
     os.makedirs(save_dir, exist_ok=True)
     
-    # 加载数据
-    if use_valid:
-        # 使用验证集
-        _, valid_dataset = generate_train_valid_dataset(data_path, train_ratio=0.8, shuffle=True)
-        dataset = valid_dataset
-    else:
-        # 使用整个数据集
-        dataset = MultiTaskDataset(data_path, shuffle=True)
-    
+    # 加载数据集
+    dataset = MultiTaskDataset(data_path, split='valid' if use_valid else 'train')
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
     
-    # 选择前num_samples个样本进行推理
-    for i, batch in enumerate(tqdm(dataloader, desc="Inferring")):
+    # 设置设备
+    device = next(model.parameters()).device
+    
+    # 评估指标
+    total_psnr = 0
+    total_position_error = 0
+    
+    # 处理指定数量的样本
+    for i, (lr, hr, source_pos) in enumerate(dataloader):
         if i >= num_samples:
             break
             
-        # 数据预处理
-        lr = batch['lr'].to(device)
-        hr = batch['hr'].to(device)
-        source_pos = batch['source_pos'].to(device)
-        hr_max_pos = batch['hr_max_pos'].to(device)
+        # 将数据移到设备上
+        lr = lr.to(device)
+        hr = hr.to(device)
+        source_pos = source_pos.to(device)
         
-        # 添加中间结果检查
+        # 模型推理
         with torch.no_grad():
-            # 检查输入
-            print("Input shape:", lr.shape)
-            print("Input device:", lr.device)
-            
-            # 检查模型状态
-            print("Model device:", next(model.parameters()).device)
-            print("Model training mode:", model.training)
-            
-            # 检查中间层输出
-            x = model.conv_first(lr)
-            print("After conv_first:", x.shape, torch.min(x).item(), torch.max(x).item())
-            
-            # 检查每个主要层的输出
-            for name, module in model.named_modules():
-                if isinstance(module, (nn.Conv2d, nn.Linear)):
-                    print(f"{name} output stats:", torch.min(x).item(), torch.max(x).item())
-            
             gdm_out, gsl_out = model(lr)
-            print("After full model:", torch.min(gdm_out).item(), torch.max(gdm_out).item())
         
-        # 可视化结果
-        save_path = os.path.join(save_dir, f'inference_result_{i+1}.png')
-        visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path)
+        # 计算HR图像的最大值位置
+        hr_max_pos = torch.tensor([torch.argmax(hr[0, 0]) % hr.shape[3], 
+                                 torch.argmax(hr[0, 0]) // hr.shape[3]], 
+                                dtype=torch.float32).to(device)
+        hr_max_pos = hr_max_pos / torch.tensor([hr.shape[3], hr.shape[2]], 
+                                             dtype=torch.float32).to(device)
         
         # 计算评估指标
-        mse = torch.mean((gdm_out - hr) ** 2)
-        psnr = 20 * torch.log10(1.0 / torch.sqrt(mse))
-        position_error = torch.sqrt(torch.sum((gsl_out - source_pos) ** 2))
+        mse = F.mse_loss(gdm_out, hr)
+        psnr = 10 * torch.log10(1.0 / mse)
+        position_error = torch.norm(gsl_out - source_pos)
         
-        print(f"\n样本 {i+1} 的评估结果:")
-        print(f"PSNR: {psnr.item():.2f} dB")
-        print(f"位置误差: {position_error.item():.4f}")
-
-        # 在数据加载时添加检查
-        print("Data loading stats:")
-        print("LR stats:", torch.min(lr).item(), torch.max(lr).item(), torch.mean(lr).item())
-        print("HR stats:", torch.min(hr).item(), torch.max(hr).item(), torch.mean(hr).item())
+        total_psnr += psnr.item()
+        total_position_error += position_error.item()
+        
+        # 保存结果
+        save_path = os.path.join(save_dir, f'sample_{i+1}.png')
+        visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path)
+    
+    # 计算平均指标
+    avg_psnr = total_psnr / num_samples
+    avg_position_error = total_position_error / num_samples
+    
+    print(f"Average PSNR: {avg_psnr:.2f} dB")
+    print(f"Average Position Error: {avg_position_error:.4f}")
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Evaluate SwinIR Multi-task Model')
