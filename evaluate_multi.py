@@ -282,18 +282,44 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
         print("HR stats:", torch.min(hr).item(), torch.max(hr).item(), torch.mean(hr).item())
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='模型推理和可视化')
+    parser = argparse.ArgumentParser(description='Evaluate SwinIR Multi-task Model')
+    
+    # 添加缺失的参数
+    parser.add_argument('--img_size', type=int, default=16,
+                      help='input image size')
+    parser.add_argument('--in_chans', type=int, default=1,
+                      help='number of input channels')
+    parser.add_argument('--upscale', type=int, default=6,
+                      help='upscale factor')
+    parser.add_argument('--window_size', type=int, default=8,
+                      help='window size')
+    parser.add_argument('--img_range', type=float, default=1.,
+                      help='image range')
+    parser.add_argument('--depths', type=list, default=[6, 6, 6, 6],
+                      help='depths of each Swin Transformer layer')
+    parser.add_argument('--embed_dim', type=int, default=60,
+                      help='embedding dimension')
+    parser.add_argument('--num_heads', type=list, default=[6, 6, 6, 6],
+                      help='number of attention heads')
+    parser.add_argument('--mlp_ratio', type=float, default=2.,
+                      help='ratio of mlp hidden dim to embedding dim')
+    parser.add_argument('--upsampler', type=str, default='nearest+conv',
+                      help='upsampler type')
+    
+    # 原有的参数
     parser.add_argument('--model_path', type=str, required=True,
-                      help='训练好的模型路径')
+                      help='path to the model checkpoint')
     parser.add_argument('--data_path', type=str, required=True,
-                      help='数据集路径')
+                      help='path to the dataset')
     parser.add_argument('--save_dir', type=str, required=True,
-                      help='结果保存目录')
+                      help='directory to save results')
     parser.add_argument('--num_samples', type=int, default=5,
-                      help='要推理的样本数量')
+                      help='number of samples to evaluate')
     parser.add_argument('--use_valid', action='store_true',
-                      help='是否使用验证集进行推理')
-    return parser.parse_args()
+                      help='use validation set')
+    
+    args = parser.parse_args()
+    return args
 
 def main():
     args = parse_args()
@@ -317,7 +343,7 @@ def main():
     
     # 加载模型
     checkpoint = torch.load(args.model_path, map_location=device)
-    print("Checkpoint keys:", checkpoint.keys())  # 打印检查点的键
+    print("Checkpoint keys:", checkpoint.keys())
     
     # 根据实际的键加载模型
     if 'model_state_dict' in checkpoint:
@@ -325,7 +351,6 @@ def main():
     elif 'model' in checkpoint:
         model.load_state_dict(checkpoint['model'])
     else:
-        # 如果检查点直接是模型状态字典
         model.load_state_dict(checkpoint)
     
     model = model.to(device)
