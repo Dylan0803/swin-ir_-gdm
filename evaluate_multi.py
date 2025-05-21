@@ -149,6 +149,20 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     axes[1, 0].axis('off')
     plt.colorbar(im2, ax=axes[1, 0])
     
+    # 在SR图像上标记泄漏源位置
+    # 反归一化坐标（乘以95.0）
+    true_pos = source_pos * 95.0
+    pred_pos = gsl_out * 95.0
+    
+    # 标记真实泄漏源位置（红色星形）
+    axes[1, 0].plot(true_pos[0], true_pos[1], 'r*', markersize=15, label='True Source')
+    
+    # 标记预测泄漏源位置（绿色星形）
+    axes[1, 0].plot(pred_pos[0], pred_pos[1], 'g*', markersize=15, label='Predicted Source')
+    
+    # 添加图例
+    axes[1, 0].legend(loc='upper right')
+    
     # 差值图
     im3 = axes[1, 1].imshow(diff, cmap='RdBu_r', vmin=-0.5, vmax=0.5)
     axes[1, 1].set_title('Difference (HR-SR)')
