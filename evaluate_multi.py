@@ -166,8 +166,8 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
     # 创建保存目录
     os.makedirs(save_dir, exist_ok=True)
     
-    # 加载数据集
-    dataset = MultiTaskDataset(data_path, split='valid' if use_valid else 'train')
+    # 加载数据集 - 移除 split 参数
+    dataset = MultiTaskDataset(data_path)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
     
     # 设置设备
