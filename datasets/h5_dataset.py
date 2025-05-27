@@ -25,18 +25,25 @@ class MultiTaskDataset(Dataset):
         # 遍历所有风场组
         for wind_group_name in self.dataset_file.keys():
             wind_group = self.dataset_file[wind_group_name]
+            # 获取所有源位置组
+            source_groups = [k for k in wind_group.keys() if k.startswith('s')]
+            
             # 遍历所有源位置
-            for source_idx in range(1, 9):
-                source_group = wind_group[f's{source_idx}']
-                # 获取时间步数量
-                time_steps = len([k for k in source_group.keys() if k.startswith('HR_')])
-                # 为每个时间步创建索引
-                for time_step in range(1, time_steps + 1):
-                    self.data_indices.append({
-                        'wind_group': wind_group_name,
-                        'source_idx': source_idx,
-                        'time_step': time_step
-                    })
+            for source_group_name in source_groups:
+                try:
+                    source_group = wind_group[source_group_name]
+                    # 获取时间步数量
+                    time_steps = len([k for k in source_group.keys() if k.startswith('HR_')])
+                    # 为每个时间步创建索引
+                    for time_step in range(1, time_steps + 1):
+                        self.data_indices.append({
+                            'wind_group': wind_group_name,
+                            'source_group': source_group_name,
+                            'time_step': time_step
+                        })
+                except Exception as e:
+                    print(f"警告：无法处理组 {wind_group_name}/{source_group_name}: {str(e)}")
+                    continue
         
         # 如果未指定索引列表，就使用全部数据
         if index_list is None:
@@ -60,48 +67,53 @@ class MultiTaskDataset(Dataset):
         - source_pos: 泄漏源位置真值 [2]，值范围[0,1]
         - hr_max_pos: HR中浓度最高值的位置 [2]，值范围[0,1]
         """
-        idx_in_file = self.index_list[idx]
-        data_info = self.data_indices[idx_in_file]
-        
-        # 获取数据组
-        wind_group = self.dataset_file[data_info['wind_group']]
-        source_group = wind_group[f's{data_info["source_idx"]}']
-        
-        # 读取LR和HR数据
-        lr = source_group[f'LR_{data_info["time_step"]}'][:]
-        hr = source_group[f'HR_{data_info["time_step"]}'][:]
-        
-        # 读取泄漏源位置信息（前两个值是x, y坐标）
-        source_info = source_group['source_info'][:]
-        source_pos = source_info[:2]  # 只取位置信息
-        
-        # 计算HR中浓度最高值的位置
-        hr_max_pos = np.unravel_index(hr.argmax(), hr.shape)
-        hr_max_pos = np.array([hr_max_pos[1], hr_max_pos[0]], dtype=np.float32)  # 转换为(x, y)顺序
-        
-        # 归一化坐标到[0,1]范围
-        # 注意：图像尺寸为96x96，所以除以95（因为坐标从0开始）
-        source_pos = source_pos / 95.0
-        hr_max_pos = hr_max_pos / 95.0
-        
-        # 增加通道维度
-        if len(lr.shape) == 2:
-            lr = lr[np.newaxis, :, :]
-        if len(hr.shape) == 2:
-            hr = hr[np.newaxis, :, :]
-        
-        # 转换为tensor
-        lr_tensor = torch.tensor(lr, dtype=torch.float32)
-        hr_tensor = torch.tensor(hr, dtype=torch.float32)
-        source_pos_tensor = torch.tensor(source_pos, dtype=torch.float32)
-        hr_max_pos_tensor = torch.tensor(hr_max_pos, dtype=torch.float32)
-        
-        return {
-            'lr': lr_tensor,          # 输入数据，已归一化到[0,1]
-            'hr': hr_tensor,          # 超分辨率任务的目标，已归一化到[0,1]
-            'source_pos': source_pos_tensor,  # 泄漏源位置真值，已归一化到[0,1]
-            'hr_max_pos': hr_max_pos_tensor  # HR中浓度最高位置，已归一化到[0,1]
-        }
+        try:
+            idx_in_file = self.index_list[idx]
+            data_info = self.data_indices[idx_in_file]
+            
+            # 获取数据组
+            wind_group = self.dataset_file[data_info['wind_group']]
+            source_group = wind_group[data_info['source_group']]
+            
+            # 读取LR和HR数据
+            lr = source_group[f'LR_{data_info["time_step"]}'][:]
+            hr = source_group[f'HR_{data_info["time_step"]}'][:]
+            
+            # 读取泄漏源位置信息（前两个值是x, y坐标）
+            source_info = source_group['source_info'][:]
+            source_pos = source_info[:2]  # 只取位置信息
+            
+            # 计算HR中浓度最高值的位置
+            hr_max_pos = np.unravel_index(hr.argmax(), hr.shape)
+            hr_max_pos = np.array([hr_max_pos[1], hr_max_pos[0]], dtype=np.float32)  # 转换为(x, y)顺序
+            
+            # 获取图像尺寸
+            height, width = hr.shape
+            # 归一化坐标到[0,1]范围
+            source_pos = source_pos / (width - 1)
+            hr_max_pos = hr_max_pos / (width - 1)
+            
+            # 增加通道维度
+            if len(lr.shape) == 2:
+                lr = lr[np.newaxis, :, :]
+            if len(hr.shape) == 2:
+                hr = hr[np.newaxis, :, :]
+            
+            # 转换为tensor
+            lr_tensor = torch.tensor(lr, dtype=torch.float32)
+            hr_tensor = torch.tensor(hr, dtype=torch.float32)
+            source_pos_tensor = torch.tensor(source_pos, dtype=torch.float32)
+            hr_max_pos_tensor = torch.tensor(hr_max_pos, dtype=torch.float32)
+            
+            return {
+                'lr': lr_tensor,          # 输入数据，已归一化到[0,1]
+                'hr': hr_tensor,          # 超分辨率任务的目标，已归一化到[0,1]
+                'source_pos': source_pos_tensor,  # 泄漏源位置真值，已归一化到[0,1]
+                'hr_max_pos': hr_max_pos_tensor  # HR中浓度最高位置，已归一化到[0,1]
+            }
+        except Exception as e:
+            print(f"错误：处理索引 {idx} 时发生错误: {str(e)}")
+            raise
 
 def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
     """
@@ -115,9 +127,14 @@ def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
         total_len = 0
         for wind_group_name in f.keys():
             wind_group = f[wind_group_name]
-            for source_idx in range(1, 9):
-                source_group = wind_group[f's{source_idx}']
-                total_len += len([k for k in source_group.keys() if k.startswith('HR_')])
+            source_groups = [k for k in wind_group.keys() if k.startswith('s')]
+            for source_group_name in source_groups:
+                try:
+                    source_group = wind_group[source_group_name]
+                    total_len += len([k for k in source_group.keys() if k.startswith('HR_')])
+                except Exception as e:
+                    print(f"警告：计算数据量时跳过组 {wind_group_name}/{source_group_name}: {str(e)}")
+                    continue
         
         index_list = list(range(total_len))
         
