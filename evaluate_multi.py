@@ -34,47 +34,57 @@ def evaluate_model(model, dataloader, device):
     
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Evaluating"):
-            # 数据预处理
-            lr = batch['lr'].to(device)
-            hr = batch['hr'].to(device)
-            source_pos = batch['source_pos'].to(device)
-            hr_max_pos = batch['hr_max_pos'].to(device)
-            
-            # 模型推理
-            gdm_out, gsl_out = model(lr)
-            
-            # 计算GDM指标
-            for i in range(gdm_out.size(0)):
-                # PSNR
-                mse = torch.mean((gdm_out[i] - hr[i]) ** 2)
-                psnr = 20 * torch.log10(1.0 / torch.sqrt(mse))
-                metrics['gdm_psnr'].append(psnr.item())
+            try:
+                # 数据预处理
+                lr = batch['lr'].to(device)
+                hr = batch['hr'].to(device)
+                source_pos = batch['source_pos'].to(device)
+                hr_max_pos = batch['hr_max_pos'].to(device)
                 
-                # SSIM (简化版)
-                c1 = (0.01 * 1.0) ** 2
-                c2 = (0.03 * 1.0) ** 2
-                mu1 = torch.mean(gdm_out[i])
-                mu2 = torch.mean(hr[i])
-                sigma1 = torch.var(gdm_out[i])
-                sigma2 = torch.var(hr[i])
-                sigma12 = torch.mean((gdm_out[i] - mu1) * (hr[i] - mu2))
-                ssim = ((2 * mu1 * mu2 + c1) * (2 * sigma12 + c2)) / \
-                       ((mu1 ** 2 + mu2 ** 2 + c1) * (sigma1 + sigma2 + c2))
-                metrics['gdm_ssim'].append(ssim.item())
-            
-            # 计算GSL指标
-            position_error = torch.sqrt(torch.sum((gsl_out - source_pos) ** 2, dim=1))
-            max_pos_error = torch.sqrt(torch.sum((gsl_out - hr_max_pos) ** 2, dim=1))
-            
-            metrics['gsl_position_error'].extend(position_error.cpu().numpy())
-            metrics['gsl_max_pos_error'].extend(max_pos_error.cpu().numpy())
+                # 模型推理
+                gdm_out, gsl_out = model(lr)
+                
+                # 计算GDM指标
+                for i in range(gdm_out.size(0)):
+                    # PSNR
+                    mse = torch.mean((gdm_out[i] - hr[i]) ** 2)
+                    psnr = 20 * torch.log10(1.0 / torch.sqrt(mse))
+                    metrics['gdm_psnr'].append(psnr.item())
+                    
+                    # SSIM (简化版)
+                    c1 = (0.01 * 1.0) ** 2
+                    c2 = (0.03 * 1.0) ** 2
+                    mu1 = torch.mean(gdm_out[i])
+                    mu2 = torch.mean(hr[i])
+                    sigma1 = torch.var(gdm_out[i])
+                    sigma2 = torch.var(hr[i])
+                    sigma12 = torch.mean((gdm_out[i] - mu1) * (hr[i] - mu2))
+                    ssim = ((2 * mu1 * mu2 + c1) * (2 * sigma12 + c2)) / \
+                           ((mu1 ** 2 + mu2 ** 2 + c1) * (sigma1 + sigma2 + c2))
+                    metrics['gdm_ssim'].append(ssim.item())
+                
+                # 计算GSL指标
+                # 反归一化坐标（乘以95.0）
+                true_pos = source_pos * 95.0
+                pred_pos = gsl_out * 95.0
+                
+                # 计算反归一化后的距离并除以10
+                position_error = torch.sqrt(torch.sum((pred_pos - true_pos) ** 2, dim=1)) / 10.0
+                max_pos_error = torch.sqrt(torch.sum((pred_pos - hr_max_pos * 95.0) ** 2, dim=1)) / 10.0
+                
+                metrics['gsl_position_error'].extend(position_error.cpu().numpy())
+                metrics['gsl_max_pos_error'].extend(max_pos_error.cpu().numpy())
+                
+            except KeyError as e:
+                print(f"跳过无效数据: {e}")
+                continue
     
     # 计算平均指标
     results = {
-        'GDM_PSNR': np.mean(metrics['gdm_psnr']),
-        'GDM_SSIM': np.mean(metrics['gdm_ssim']),
-        'GSL_Position_Error': np.mean(metrics['gsl_position_error']),
-        'GSL_MaxPos_Error': np.mean(metrics['gsl_max_pos_error'])
+        'GDM_PSNR': np.mean(metrics['gdm_psnr']) if metrics['gdm_psnr'] else 0,
+        'GDM_SSIM': np.mean(metrics['gdm_ssim']) if metrics['gdm_ssim'] else 0,
+        'GSL_Position_Error': np.mean(metrics['gsl_position_error']) if metrics['gsl_position_error'] else 0,
+        'GSL_MaxPos_Error': np.mean(metrics['gsl_max_pos_error']) if metrics['gsl_max_pos_error'] else 0
     }
     
     return results, metrics
@@ -116,6 +126,7 @@ def plot_metrics(metrics, save_dir):
     plt.close()
 
 def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path):
+    """可视化单个样本的结果"""
     # 转换为numpy数组并移除batch维度
     lr = lr.squeeze().cpu().numpy()
     hr = hr.squeeze().cpu().numpy()
@@ -175,8 +186,22 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     # 保存图像
     plt.savefig(save_path)
     plt.close()
+    
+    # 计算反归一化后的距离并除以10
+    distance = np.sqrt(np.sum((pred_pos - true_pos) ** 2)) / 10.0
+    return distance
 
 def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
+    """
+    模型推理函数
+    
+    参数:
+        model: 训练好的模型
+        data_path: 数据路径
+        save_dir: 保存结果的目录
+        num_samples: 要评估的样本数量
+        use_valid: 是否使用验证集
+    """
     # 创建保存目录
     os.makedirs(save_dir, exist_ok=True)
     
@@ -190,55 +215,95 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
     # 评估指标
     total_psnr = 0
     total_position_error = 0
+    total_mse = 0
+    total_ssim = 0
+    valid_samples = 0
     
     # 处理指定数量的样本
     for i, batch in enumerate(dataloader):
         if i >= num_samples:
             break
             
-        # 解包数据
-        if isinstance(batch, (list, tuple)):
-            lr, hr, source_pos = batch
-        else:
-            # 如果batch是字典，则按键获取数据
-            lr = batch['lr']
-            hr = batch['hr']
-            source_pos = batch['source_pos']
-        
-        # 将数据移到设备上
-        lr = lr.to(device)
-        hr = hr.to(device)
-        source_pos = source_pos.to(device)
-        
-        # 模型推理
-        with torch.no_grad():
-            gdm_out, gsl_out = model(lr)
-        
-        # 计算HR图像的最大值位置
-        hr_max_pos = torch.tensor([torch.argmax(hr[0, 0]) % hr.shape[3], 
-                                 torch.argmax(hr[0, 0]) // hr.shape[3]], 
-                                dtype=torch.float32).to(device)
-        hr_max_pos = hr_max_pos / torch.tensor([hr.shape[3], hr.shape[2]], 
-                                             dtype=torch.float32).to(device)
-        
-        # 计算评估指标
-        mse = F.mse_loss(gdm_out, hr)
-        psnr = 10 * torch.log10(1.0 / mse)
-        position_error = torch.norm(gsl_out - source_pos)
-        
-        total_psnr += psnr.item()
-        total_position_error += position_error.item()
-        
-        # 保存结果
-        save_path = os.path.join(save_dir, f'sample_{i+1}.png')
-        visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path)
+        try:
+            # 解包数据
+            if isinstance(batch, (list, tuple)):
+                lr, hr, source_pos = batch
+            else:
+                # 如果batch是字典，则按键获取数据
+                lr = batch['lr']
+                hr = batch['hr']
+                source_pos = batch['source_pos']
+            
+            # 将数据移到设备上
+            lr = lr.to(device)
+            hr = hr.to(device)
+            source_pos = source_pos.to(device)
+            
+            # 模型推理
+            with torch.no_grad():
+                gdm_out, gsl_out = model(lr)
+            
+            # 计算HR图像的最大值位置
+            hr_max_pos = torch.tensor([torch.argmax(hr[0, 0]) % hr.shape[3], 
+                                     torch.argmax(hr[0, 0]) // hr.shape[3]], 
+                                    dtype=torch.float32).to(device)
+            hr_max_pos = hr_max_pos / torch.tensor([hr.shape[3], hr.shape[2]], 
+                                                 dtype=torch.float32).to(device)
+            
+            # 计算评估指标
+            # MSE损失
+            mse = F.mse_loss(gdm_out, hr)
+            
+            # PSNR
+            psnr = 10 * torch.log10(1.0 / mse)
+            
+            # SSIM计算
+            c1 = (0.01 * 1.0) ** 2
+            c2 = (0.03 * 1.0) ** 2
+            mu1 = torch.mean(gdm_out)
+            mu2 = torch.mean(hr)
+            sigma1 = torch.var(gdm_out)
+            sigma2 = torch.var(hr)
+            sigma12 = torch.mean((gdm_out - mu1) * (hr - mu2))
+            ssim = ((2 * mu1 * mu2 + c1) * (2 * sigma12 + c2)) / \
+                   ((mu1 ** 2 + mu2 ** 2 + c1) * (sigma1 + sigma2 + c2))
+            
+            # 反归一化坐标（乘以95.0）
+            true_pos = source_pos * 95.0
+            pred_pos = gsl_out * 95.0
+            
+            # 计算反归一化后的直线距离并除以10（转换为米）
+            position_error = torch.sqrt(torch.sum((pred_pos - true_pos) ** 2)) / 10.0
+            
+            total_psnr += psnr.item()
+            total_position_error += position_error.item()
+            total_mse += mse.item()
+            total_ssim += ssim.item()
+            valid_samples += 1
+            
+            # 保存结果
+            save_path = os.path.join(save_dir, f'sample_{i+1}.png')
+            visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path)
+            
+        except KeyError as e:
+            print(f"跳过无效数据: {e}")
+            continue
     
     # 计算平均指标
-    avg_psnr = total_psnr / num_samples
-    avg_position_error = total_position_error / num_samples
-    
-    print(f"Average PSNR: {avg_psnr:.2f} dB")
-    print(f"Average Position Error: {avg_position_error:.4f}")
+    if valid_samples > 0:
+        avg_psnr = total_psnr / valid_samples
+        avg_position_error = total_position_error / valid_samples
+        avg_mse = total_mse / valid_samples
+        avg_ssim = total_ssim / valid_samples
+        
+        print(f"\n评估结果:")
+        print(f"有效样本数: {valid_samples}")
+        print(f"Average PSNR: {avg_psnr:.2f} dB")
+        print(f"Average MSE: {avg_mse:.6f}")
+        print(f"Average SSIM: {avg_ssim:.4f}")
+        print(f"Average Position Error: {avg_position_error:.4f} m")
+    else:
+        print("没有有效的样本可供评估")
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Evaluate SwinIR Multi-task Model')
@@ -274,8 +339,6 @@ def parse_args():
                       help='directory to save results')
     parser.add_argument('--num_samples', type=int, default=5,
                       help='number of samples to evaluate')
-    parser.add_argument('--use_valid', action='store_true',
-                      help='use validation set')
     
     args = parser.parse_args()
     return args
@@ -316,7 +379,7 @@ def main():
     model.eval()
     
     # 进行推理
-    infer_model(model, args.data_path, args.save_dir, args.num_samples, args.use_valid)
+    infer_model(model, args.data_path, args.save_dir, args.num_samples)
 
 if __name__ == '__main__':
     main()
