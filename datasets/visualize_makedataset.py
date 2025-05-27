@@ -198,40 +198,50 @@ def visualize_augmented_data(h5_path):
         h5_path: path to the augmented h5 file
     """
     with h5py.File(h5_path, 'r') as f:
-        # Get all wind groups (including original and augmented)
-        wind_groups = list(f.keys())
-        # Get all source positions from the first wind group
+        # 获取所有风场组（包括原始和增强的）
+        wind_groups = [k for k in f.keys() if k.startswith('wind')]
+        # 获取第一个风场组中的源位置
         source_groups = [k for k in f[wind_groups[0]].keys() if k.startswith('s')]
         
-        # Get the shape of the first dataset
+        # 获取第一个数据集的形状
         first_data = f[wind_groups[0]][source_groups[0]]['HR_1'][:]
         
-        # Calculate actual number of iterations
+        # 计算实际的迭代次数
         num_iterations = len([k for k in f[wind_groups[0]][source_groups[0]].keys() 
                             if k.startswith('HR_')])
         
-        # Create figure and subplots
+        # 创建图形和子图
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
         plt.subplots_adjust(bottom=0.3)
         
-        # Create sliders
+        # 创建滑块
         wind_ax = plt.axes([0.2, 0.2, 0.6, 0.03])
         source_ax = plt.axes([0.2, 0.15, 0.6, 0.03])
         iter_ax = plt.axes([0.2, 0.1, 0.6, 0.03])
         
-        wind_slider = Slider(wind_ax, 'Wind', 1, 3, valinit=1, valstep=1)  # Changed to 3
+        # 计算实际的风场数量（通过分析wind_groups中的不同wind编号）
+        wind_numbers = set()
+        for wind_group in wind_groups:
+            if '_' in wind_group:
+                wind_num = int(wind_group.split('_')[0].replace('wind', ''))
+            else:
+                wind_num = int(wind_group.replace('wind', ''))
+            wind_numbers.add(wind_num)
+        num_winds = len(wind_numbers)
+        
+        wind_slider = Slider(wind_ax, 'Wind', 1, num_winds, valinit=1, valstep=1)
         source_slider = Slider(source_ax, 'Source', 1, len(source_groups), valinit=1, valstep=1)
         iter_slider = Slider(iter_ax, 'Iteration', 1, num_iterations, valinit=1, valstep=1)
         
-        # Create colorbar
+        # 创建颜色条
         im1 = ax1.imshow(first_data, cmap='viridis')
         cbar1 = plt.colorbar(im1, ax=ax1, label='Concentration')
         
-        # Get wind field data
+        # 获取风场数据
         wind_points = f[wind_groups[0]]['points'][:]
         wind_velocity = f[wind_groups[0]]['velocity'][:]
         
-        # Draw wind field vector plot
+        # 绘制风场矢量图
         im2 = ax2.quiver(wind_points[:, 0], wind_points[:, 1], 
                         wind_velocity[:, 0], wind_velocity[:, 1],
                         scale=50)
@@ -239,23 +249,23 @@ def visualize_augmented_data(h5_path):
         ax2.set_xlabel('X')
         ax2.set_ylabel('Y')
         
-        # Initialize LR plot
+        # 初始化LR图的显示
         im3 = ax3.imshow(np.zeros((16, 16)), cmap='viridis')
         cbar3 = plt.colorbar(im3, ax=ax3, label='Concentration')
         
-        # Create augmentation type buttons
+        # 创建增强类型按钮
         aug_types = ['Original', 'Rotate 90°', 'Rotate 180°', 'Rotate 270°', 'Flip Horizontal', 'Flip Vertical']
         aug_buttons = []
         button_axes = []
         
-        # Create buttons for each augmentation type
+        # 为每个增强类型创建按钮
         for i, aug_type in enumerate(aug_types):
             button_ax = plt.axes([0.1 + i*0.15, 0.025, 0.12, 0.04])
             button = Button(button_ax, aug_type, color='lightgoldenrodyellow', hovercolor='0.975')
             aug_buttons.append(button)
             button_axes.append(button_ax)
         
-        # Current selected augmentation type
+        # 当前选择的增强类型
         current_aug_type = 0
         
         def update(val):
@@ -263,7 +273,7 @@ def visualize_augmented_data(h5_path):
             source_idx = int(source_slider.val)
             iter_idx = int(iter_slider.val)
             
-            # Select wind group based on current augmentation type
+            # 根据当前增强类型选择风场组
             wind_base = f'wind{wind_idx}'
             if current_aug_type == 0:
                 wind_group_name = f'{wind_base}_0'
@@ -281,23 +291,23 @@ def visualize_augmented_data(h5_path):
             source_group_name = f's{source_idx}'
             
             try:
-                # Update HR concentration data
+                # 更新HR浓度数据
                 wind_group = f[wind_group_name]
                 source_group = wind_group[source_group_name]
                 hr_data = source_group[f'HR_{iter_idx}'][:]
                 lr_data = source_group[f'LR_{iter_idx}'][:]
                 
-                # Update HR plot
+                # 更新HR图
                 im1.set_data(hr_data)
                 im1.set_clim(vmin=hr_data.min(), vmax=hr_data.max())
                 ax1.set_title(f'HR Concentration - {wind_group_name}, Source {source_idx}, Iteration {iter_idx}')
                 
-                # Update LR plot
+                # 更新LR图
                 im3.set_data(lr_data)
                 im3.set_clim(vmin=lr_data.min(), vmax=lr_data.max())
                 ax3.set_title(f'LR Concentration (16x16)')
                 
-                # Clear previous markers and text
+                # 清除之前的所有标记和文本
                 for artist in ax1.lines + ax1.texts:
                     artist.remove()
                 if ax1.legend_:
@@ -313,11 +323,11 @@ def visualize_augmented_data(h5_path):
                             bbox=dict(facecolor='black', alpha=0.5))
                     ax1.legend()
                 
-                # Update wind field data
+                # 更新风场数据
                 wind_points = wind_group['points'][:]
                 wind_velocity = wind_group['velocity'][:]
                 
-                # Clear old wind field plot
+                # 清除旧的风场图
                 ax2.clear()
                 im2 = ax2.quiver(wind_points[:, 0], wind_points[:, 1], 
                                wind_velocity[:, 0], wind_velocity[:, 1],
@@ -326,7 +336,7 @@ def visualize_augmented_data(h5_path):
                 ax2.set_xlabel('X')
                 ax2.set_ylabel('Y')
                 
-                # Display data information in the fourth subplot
+                # 在第四个子图中显示数据信息
                 ax4.clear()
                 ax4.axis('off')
                 info_text = f"Data Information:\n"
@@ -342,32 +352,32 @@ def visualize_augmented_data(h5_path):
                 ax4.text(0.1, 0.5, info_text, fontsize=10, va='center', family='monospace')
                 
             except KeyError as e:
-                print(f"Data not found: {e}")
+                print(f"无法找到数据: {e}")
                 return
             
             fig.canvas.draw_idle()
         
-        # Create callback functions for buttons
+        # 创建按钮回调函数
         def create_button_callback(i):
             def callback(event):
                 nonlocal current_aug_type
                 current_aug_type = i
-                # Update button colors
+                # 更新按钮颜色
                 for j, button in enumerate(aug_buttons):
                     button.color = 'lightgoldenrodyellow' if j != i else 'lightblue'
                 update(1)
             return callback
         
-        # Register button callbacks
+        # 注册按钮回调
         for i, button in enumerate(aug_buttons):
             button.on_clicked(create_button_callback(i))
         
-        # Register slider update functions
+        # 注册滑块更新函数
         wind_slider.on_changed(update)
         source_slider.on_changed(update)
         iter_slider.on_changed(update)
         
-        # Add reset button
+        # 添加重置按钮
         reset_ax = plt.axes([0.8, 0.025, 0.1, 0.04])
         reset_button = Button(reset_ax, 'Reset', color='lightgoldenrodyellow', hovercolor='0.975')
         
@@ -375,7 +385,7 @@ def visualize_augmented_data(h5_path):
             wind_slider.reset()
             source_slider.reset()
             iter_slider.reset()
-            # Reset augmentation type buttons
+            # 重置增强类型按钮
             nonlocal current_aug_type
             current_aug_type = 0
             for i, button in enumerate(aug_buttons):
@@ -384,7 +394,7 @@ def visualize_augmented_data(h5_path):
         
         reset_button.on_clicked(reset)
         
-        # Show first data
+        # 显示第一个数据
         update(1)
         
         plt.show()
@@ -433,9 +443,9 @@ def main():
     choice = input("请输入选项（1/2/3）：")
     
     if choice == '1':
-        h5_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\dataset.h5'  # 修复缩进
+        h5_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\test_dataset.h5'  # 修复缩进
     elif choice == '2':
-        h5_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\augmented_dataset.h5'
+        h5_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\test_normalized_augmented_dataset.h5'
     elif choice == '3':
         h5_path = input("请输入h5文件的完整路径：")
     else:

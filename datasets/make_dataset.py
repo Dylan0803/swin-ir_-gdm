@@ -73,15 +73,17 @@ def read_concentration_file(file_path):
     
     return metadata, conc_data
 
-def get_source_positions():
+def get_source_positions(source_file):
     """
     获取所有泄漏源位置信息
+    
+    Args:
+        source_file: 源位置文件路径
     
     Returns:
         source_positions: 包含所有泄漏源位置信息的字典
     """
     source_positions = {}
-    source_file = 'C:\\Users\\yy143\\Desktop\\dataset\\data\\source.txt'
     
     with open(source_file, 'r') as f:
         for line in f:
@@ -99,34 +101,38 @@ def get_source_positions():
                     # 转换坐标（乘以10并取整）
                     x = int(x * 10)
                     y = int(y * 10)
-                    
+
                     source_positions[key] = np.array([x, y])
     
     return source_positions
 
-def txt_to_h5(data_root, output_path):
+def txt_to_h5(data_root, output_path, wind_files):
     """
     将txt浓度数据转换为h5文件，并进行下采样
     
     Args:
         data_root: 原始数据根目录，包含w1s1-w1s8等文件夹
         output_path: 输出h5文件路径
+        wind_files: 风场文件路径字典
     """
     # 获取泄漏源位置信息
-    source_positions = get_source_positions()
+    source_file = os.path.join(data_root, 'source.txt')
+    source_positions = get_source_positions(source_file)
     
     # 创建h5文件
     with h5py.File(output_path, 'w') as f:
-        # 首先处理风场数据
-        wind_files = {
-            'wind1': 'C:\\Users\\yy143\\Desktop\\dataset\\data\\inlet11_05.csv ',
-            'wind2': 'C:\\Users\\yy143\\Desktop\\dataset\\data\\inlet22_05.csv',
-            'wind3': 'C:\\Users\\yy143\\Desktop\\dataset\\data\\inlet33_05.csv'
-        }
+        # 动态获取存在的风场和源组合
+        existing_combinations = []
+        for wind_idx in range(1, 4):
+            for source_idx in range(1, 9):
+                source_dir = os.path.join(data_root, f'w{wind_idx}s{source_idx}')
+                if os.path.exists(source_dir):
+                    existing_combinations.append((wind_idx, source_idx))
         
+        # 处理风场数据
         for wind_idx, wind_file in wind_files.items():
             # 读取风场数据
-            wind_data = read_wind_data(os.path.join(data_root, wind_file))
+            wind_data = read_wind_data(wind_file)
             
             # 创建风场组
             wind_group = f.create_group(wind_idx)
@@ -135,72 +141,76 @@ def txt_to_h5(data_root, output_path):
             wind_group.create_dataset('points', data=wind_data['points'])
             wind_group.create_dataset('velocity', data=wind_data['velocity'])
         
-        # 处理三种风场情况下的浓度数据
-        for wind_idx in range(1, 4):
+        # 处理存在的风场和源组合
+        for wind_idx, source_idx in existing_combinations:
             wind_group = f[f'wind{wind_idx}']
+            source_group = wind_group.create_group(f's{source_idx}')
             
-            # 处理8种泄漏源位置
-            for source_idx in range(1, 9):
-                source_group = wind_group.create_group(f's{source_idx}')
+            # 构建源数据路径
+            source_dir = os.path.join(data_root, f'w{wind_idx}s{source_idx}')
+            
+            # 获取所有concentration文件
+            conc_files = sorted([f for f in os.listdir(source_dir) 
+                              if f.startswith('concentration_') and f.endswith('.txt')])
+            
+            # 读取并存储每个浓度文件
+            for i, conc_file in enumerate(tqdm(conc_files, 
+                desc=f'Processing wind{wind_idx} source{source_idx}')):
                 
-                # 构建源数据路径
-                source_dir = os.path.join(data_root, f'w{wind_idx}s{source_idx}')
+                # 读取txt文件
+                metadata, conc_data = read_concentration_file(
+                    os.path.join(source_dir, conc_file)
+                )
                 
-                # 获取所有concentration文件
-                conc_files = sorted([f for f in os.listdir(source_dir) 
-                                  if f.startswith('concentration_') and f.endswith('.txt')])
+                # 剪切数据到96x96
+                conc_data = conc_data[2:98, 2:98]  # 从中心剪切出96x96的数据
                 
-                # 读取并存储每个浓度文件
-                for i, conc_file in enumerate(tqdm(conc_files, 
-                    desc=f'Processing wind{wind_idx} source{source_idx}')):
-                    
-                    # 读取txt文件
-                    metadata, conc_data = read_concentration_file(
-                        os.path.join(source_dir, conc_file)
-                    )
-                    
-                    # 剪切数据到96x96
-                    conc_data = conc_data[2:98, 2:98]  # 从中心剪切出96x96的数据
-                    
-                    # 存储高分辨率数据
-                    dataset = source_group.create_dataset(
-                        f'HR_{i+1}', 
-                        data=conc_data,
-                        compression='gzip'  # 使用gzip压缩
-                    )
-                    
-                    # 下采样到16x16
-                    scale_factor = 16 / 96  # 计算缩放因子
-                    lr_data = zoom(conc_data, scale_factor, order=1)  # 使用线性插值
-                    
-                    # 存储低分辨率数据
-                    lr_dataset = source_group.create_dataset(
-                        f'LR_{i+1}',
-                        data=lr_data,
-                        compression='gzip'
-                    )
-                    
-                    # 存储元数据
-                    for key, value in metadata.items():
-                        dataset.attrs[key] = value
-                        lr_dataset.attrs[key] = value
+                # 存储高分辨率数据
+                dataset = source_group.create_dataset(
+                    f'HR_{i+1}', 
+                    data=conc_data,
+                    compression='gzip'  # 使用gzip压缩
+                )
                 
-                # 存储源位置信息
-                source_key = f'w{wind_idx}s{source_idx}'
-                if source_key in source_positions:
-                    # 获取源位置
-                    source_pos = source_positions[source_key]
-                    # 调整源位置坐标（减去偏移量）
-                    source_pos[0] = max(0, source_pos[0] - 2)  # 确保不会出现负值
-                    source_pos[1] = max(0, source_pos[1] - 2)  # 确保不会出现负值
-                    # 获取数据高度
-                    height = source_group['HR_1'].shape[0]
-                    # 垂直翻转y坐标
-                    source_pos[1] = height - 1 - source_pos[1]
-                    # 创建源信息数组，包含位置和浓度信息
-                    source_info = np.array([source_pos[0], source_pos[1], 10.0])  # 10.0代表10ppm
-                    # 存储源信息
-                    source_group.create_dataset('source_info', data=source_info)
+                # 下采样到16x16
+                scale_factor = 16 / 96  # 计算缩放因子
+                lr_data = zoom(conc_data, scale_factor, order=1)  # 使用线性插值
+                
+                # 存储低分辨率数据
+                lr_dataset = source_group.create_dataset(
+                    f'LR_{i+1}',
+                    data=lr_data,
+                    compression='gzip'
+                )
+                
+                # 存储元数据
+                for key, value in metadata.items():
+                    dataset.attrs[key] = value
+                    lr_dataset.attrs[key] = value
+            
+            # 存储源位置信息
+            source_key = f'w{wind_idx}s{source_idx}'
+            if source_key in source_positions:
+                # 获取源位置
+                source_pos = source_positions[source_key]
+                
+                # 调整源位置坐标
+                if wind_idx in [1, 3] and source_idx in [1, 2, 3]:
+                    # 对于w1s1-w1s3和w3s1-w3s3，不需要额外的偏移
+                    pass
+                else:
+                    # 对于其他情况，确保不会出现负值
+                    source_pos[0] = max(0, source_pos[0] - 2)
+                    source_pos[1] = max(0, source_pos[1] - 2)
+                
+                # 获取数据高度
+                height = source_group['HR_1'].shape[0]
+                # 垂直翻转y坐标
+                source_pos[1] = height - 1 - source_pos[1]
+                # 创建源信息数组，包含位置和浓度信息
+                source_info = np.array([source_pos[0], source_pos[1], 10.0])  # 10.0代表10ppm
+                # 存储源信息
+                source_group.create_dataset('source_info', data=source_info)
 
 def augment_dataset(h5_path, output_path):
     """
@@ -208,21 +218,29 @@ def augment_dataset(h5_path, output_path):
     """
     print("\n开始数据增强处理...")
     with h5py.File(h5_path, 'r') as f_in, h5py.File(output_path, 'w') as f_out:
-        # Process each wind field case
-        for wind_idx in range(1, 4):
+        # 遍历所有风场组
+        for wind_group_name in f_in.keys():
+            if not wind_group_name.startswith('wind'):
+                continue
+                
+            wind_idx = int(wind_group_name.replace('wind', ''))
             print(f"\n处理风场 {wind_idx}...")
-            wind_group = f_in[f'wind{wind_idx}']
+            wind_group = f_in[wind_group_name]
             
             # Create original data group (with _0 suffix)
             wind_out_group = f_out.create_group(f'wind{wind_idx}_0')
             wind_out_group.create_dataset('points', data=wind_group['points'][:])
             wind_out_group.create_dataset('velocity', data=wind_group['velocity'][:])
             
-            # Process each source position
-            for source_idx in range(1, 9):
+            # 获取该风场下实际存在的源位置
+            existing_sources = [key for key in wind_group.keys() if key.startswith('s')]
+            
+            # Process each existing source position
+            for source_key in existing_sources:
+                source_idx = int(source_key.replace('s', ''))
                 print(f"  处理源位置 {source_idx}...")
-                source_group = wind_group[f's{source_idx}']
-                source_out_group = wind_out_group.create_group(f's{source_idx}')
+                source_group = wind_group[source_key]
+                source_out_group = wind_out_group.create_group(source_key)
                 
                 # Copy original data
                 for i in range(1, len([k for k in source_group.keys() if k.startswith('HR_')]) + 1):
@@ -288,10 +306,10 @@ def augment_dataset(h5_path, output_path):
                 wind_aug_group.create_dataset('points', data=points)
                 wind_aug_group.create_dataset('velocity', data=velocity)
                 
-                # Process each source position
-                for source_idx in range(1, 9):
-                    source_group = wind_group[f's{source_idx}']
-                    source_aug_group = wind_aug_group.create_group(f's{source_idx}')
+                # Process each existing source position
+                for source_key in existing_sources:
+                    source_group = wind_group[source_key]
+                    source_aug_group = wind_aug_group.create_group(source_key)
                     
                     # Process each time step
                     for i in range(1, len([k for k in source_group.keys() if k.startswith('HR_')]) + 1):
@@ -308,7 +326,6 @@ def augment_dataset(h5_path, output_path):
                             source_aug_group[f'LR_{i}'].attrs[key] = value
                     
                     # Process source position information
-                    # 获取源位置
                     source_info = source_group['source_info'][:]
                     x, y, conc = source_info
                     if aug_name == 'rot90':
@@ -400,18 +417,29 @@ def normalize_dataset(h5_path, output_path):
         print("\n归一化完成！")
 
 def main():
-    # 设置路径
-    data_root = 'C:\\Users\\yy143\\Desktop\\dataset\\data'  # 原始数据根目录
-    output_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\dataset.h5'  # 输出h5文件路径
-    aug_output_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\augmented_dataset.h5'  # 增强后的h5文件路径
-    norm_output_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\normalized_augmented_dataset.h5'  # 修改后的归一化文件名
+    # 设置所有路径
+    base_dir = 'C:\\Users\\yy143\\Desktop\\dataset'
+    data_root = os.path.join(base_dir, 'test_data')  # 原始数据根目录
+    source_dataset_dir = os.path.join(base_dir, 'source_dataset')  # 输出目录
     
     # 创建输出目录（如果不存在）
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    os.makedirs(source_dataset_dir, exist_ok=True)
+    
+    # 设置输出文件路径
+    output_path = os.path.join(source_dataset_dir, 'test_dataset.h5')
+    aug_output_path = os.path.join(source_dataset_dir, 'test_augmented_dataset.h5')
+    norm_output_path = os.path.join(source_dataset_dir, 'test_normalized_augmented_dataset.h5')
+    
+    # 设置风场文件路径
+    wind_files = {
+        'wind1': os.path.join(base_dir, 'test_data', 'inlet11_05.csv'),
+        'wind2': os.path.join(base_dir, 'test_data', 'inlet22_05.csv'),
+        'wind3': os.path.join(base_dir, 'test_data', 'inlet33_05.csv')
+    }
     
     # 转换数据
     print("\n开始转换数据...")
-    txt_to_h5(data_root, output_path)
+    txt_to_h5(data_root, output_path, wind_files)
     print("数据转换完成！")
     
     # 进行数据增强
