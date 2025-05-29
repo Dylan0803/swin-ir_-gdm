@@ -38,40 +38,14 @@ def parse_args():
                       help='path to the dataset')
     parser.add_argument('--save_dir', type=str, required=True,
                       help='directory to save results')
-    parser.add_argument('--batch_size', type=int, default=32,
+    parser.add_argument('--batch_size', type=int, default=64,
                       help='batch size')
-    parser.add_argument('--num_epochs', type=int, default=100,
+    parser.add_argument('--num_epochs', type=int, default=50,
                       help='number of epochs')
     
-    # 模型配置参数
-    parser.add_argument('--img_size', type=int, default=16,
-                      help='LR input image size (HR size will be img_size * upscale)')
-    parser.add_argument('--in_chans', type=int, default=1,
-                      help='number of input channels')
-    parser.add_argument('--upscale', type=int, default=6,
-                      help='upscale factor')
-    parser.add_argument('--window_size', type=int, default=8,
-                      help='window size')
-    parser.add_argument('--img_range', type=float, default=1.,
-                      help='image range')
-    parser.add_argument('--depths', type=list, default=[6, 6, 6, 6],
-                      help='depths of each Swin Transformer layer')
-    parser.add_argument('--embed_dim', type=int, default=60,
-                      help='embedding dimension')
-    parser.add_argument('--num_heads', type=list, default=[6, 6, 6, 6],
-                      help='number of attention heads')
-    parser.add_argument('--mlp_ratio', type=float, default=2.,
-                      help='ratio of mlp hidden dim to embedding dim')
-    parser.add_argument('--upsampler', type=str, default='nearest+conv',
-                      help='upsampler type')
-    
-    # 优化器参数
-    parser.add_argument('--lr', type=float, default=1e-4,
+    # 训练参数
+    parser.add_argument('--lr', type=float, default=0.0002,
                       help='learning rate')
-    parser.add_argument('--weight_decay', type=float, default=0,
-                      help='weight decay')
-    
-    # 任务权重参数
     parser.add_argument('--gdm_weight', type=float, default=1.0,
                       help='weight for GDM (super-resolution) task')
     parser.add_argument('--gsl_weight', type=float, default=0.5,
@@ -102,23 +76,43 @@ def calculate_position_error(pred_pos, gt_pos):
 
 def create_model(args):
     """根据参数创建模型"""
-    model_params = {
-        'img_size': args.img_size,
-        'in_chans': args.in_chans,
-        'upscale': args.upscale,
-        'window_size': args.window_size,
-        'img_range': args.img_range,
-        'depths': args.depths,
-        'embed_dim': args.embed_dim,
-        'num_heads': args.num_heads,
-        'mlp_ratio': args.mlp_ratio,
-        'upsampler': args.upsampler
+    # 基础模型参数
+    base_params = {
+        'img_size': 16,  # LR图像大小
+        'in_chans': 1,   # 输入通道数
+        'upscale': 6,    # 上采样倍数
+        'img_range': 1.,  # 图像范围
+        'upsampler': 'nearest+conv'  # 上采样器类型
+    }
+    
+    # 原始模型参数
+    original_params = {
+        **base_params,
+        'window_size': 8,  # Swin Transformer窗口大小
+        'depths': [6, 6, 6, 6],  # Swin Transformer深度
+        'embed_dim': 60,  # 嵌入维度
+        'num_heads': [6, 6, 6, 6],  # 注意力头数
+        'mlp_ratio': 2.,  # MLP比率
+    }
+    
+    # 增强版模型参数
+    enhanced_params = {
+        **base_params,
+        'window_size': 8,  # Swin Transformer窗口大小
+        'depths': [6, 6, 6, 6],  # Swin Transformer深度
+        'embed_dim': 60,  # 嵌入维度
+        'num_heads': [6, 6, 6, 6],  # 注意力头数
+        'mlp_ratio': 2.,  # MLP比率
+        # 增强版特有的参数
+        'attention_channels': 32,  # 注意力机制的通道数
+        'fusion_channels': 64,    # 特征融合的通道数
+        'dropout_rate': 0.1,      # Dropout比率
     }
     
     if args.model_type == 'original':
-        model = SwinIRMulti(**model_params)
+        model = SwinIRMulti(**original_params)
     else:  # enhanced
-        model = SwinIRMultiEnhanced(**model_params)
+        model = SwinIRMultiEnhanced(**enhanced_params)
     
     return model
 
@@ -132,7 +126,7 @@ def train_model(model, train_loader, valid_loader, args):
     gsl_criterion = nn.MSELoss()  # 泄漏源定位损失
     
     # 定义优化器
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
     
     # 学习率调度器
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
@@ -283,7 +277,6 @@ def train(args):
     logging.basicConfig(level=logging.INFO)
     print(f"Starting training with arguments: {args}")
     print(f"Using multi-task learning with GDM and GSL")
-    print(f"Upsampler mode: {args.upsampler}")
 
     # CUDA设置和内存管理
     torch.cuda.empty_cache()
