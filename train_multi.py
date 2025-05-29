@@ -146,7 +146,11 @@ def train_model(model, train_loader, valid_loader, args):
         train_gdm_loss = 0
         train_gsl_loss = 0
         
-        for batch in tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.num_epochs}'):
+        # 创建训练进度条
+        train_pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} [Train]',
+                         leave=True, ncols=100)
+        
+        for batch in train_pbar:
             # 获取数据
             lr = batch['lr'].to(device)
             hr = batch['hr'].to(device)
@@ -171,6 +175,13 @@ def train_model(model, train_loader, valid_loader, args):
             train_loss += loss.item()
             train_gdm_loss += gdm_loss.item()
             train_gsl_loss += gsl_loss.item()
+            
+            # 更新进度条
+            train_pbar.set_postfix({
+                'loss': f'{loss.item():.4f}',
+                'gdm_loss': f'{gdm_loss.item():.4f}',
+                'gsl_loss': f'{gsl_loss.item():.4f}'
+            })
         
         # 计算平均训练损失
         train_loss /= len(train_loader)
@@ -183,8 +194,12 @@ def train_model(model, train_loader, valid_loader, args):
         valid_gdm_loss = 0
         valid_gsl_loss = 0
         
+        # 创建验证进度条
+        valid_pbar = tqdm(valid_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} [Valid]',
+                         leave=True, ncols=100)
+        
         with torch.no_grad():
-            for batch in valid_loader:
+            for batch in valid_pbar:
                 lr = batch['lr'].to(device)
                 hr = batch['hr'].to(device)
                 source_pos = batch['source_pos'].to(device)
@@ -198,6 +213,13 @@ def train_model(model, train_loader, valid_loader, args):
                 valid_loss += loss.item()
                 valid_gdm_loss += gdm_loss.item()
                 valid_gsl_loss += gsl_loss.item()
+                
+                # 更新进度条
+                valid_pbar.set_postfix({
+                    'loss': f'{loss.item():.4f}',
+                    'gdm_loss': f'{gdm_loss.item():.4f}',
+                    'gsl_loss': f'{gsl_loss.item():.4f}'
+                })
         
         # 计算平均验证损失
         valid_loss /= len(valid_loader)
@@ -208,7 +230,7 @@ def train_model(model, train_loader, valid_loader, args):
         scheduler.step(valid_loss)
         
         # 打印训练信息
-        print(f'Epoch {epoch+1}/{args.num_epochs}:')
+        print(f'\nEpoch {epoch+1}/{args.num_epochs} Summary:')
         print(f'Train Loss: {train_loss:.4f} (GDM: {train_gdm_loss:.4f}, GSL: {train_gsl_loss:.4f})')
         print(f'Valid Loss: {valid_loss:.4f} (GDM: {valid_gdm_loss:.4f}, GSL: {valid_gsl_loss:.4f})')
         print(f'Current LR: {optimizer.param_groups[0]["lr"]:.6f}')
