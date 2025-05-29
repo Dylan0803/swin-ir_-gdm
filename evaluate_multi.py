@@ -308,6 +308,11 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
 def parse_args():
     parser = argparse.ArgumentParser(description='Evaluate SwinIR Multi-task Model')
     
+    # 添加模型类型选择参数
+    parser.add_argument('--model_type', type=str, default='original',
+                      choices=['original', 'enhanced'],
+                      help='选择模型类型: original 或 enhanced')
+    
     # 添加缺失的参数
     parser.add_argument('--img_size', type=int, default=16,
                       help='input image size')
@@ -343,6 +348,30 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+def create_model(args):
+    """根据参数创建模型"""
+    # 基础模型参数
+    base_params = {
+        'img_size': args.img_size,
+        'in_chans': args.in_chans,
+        'upscale': args.upscale,
+        'img_range': args.img_range,
+        'upsampler': args.upsampler,
+        'window_size': args.window_size,
+        'depths': args.depths,
+        'embed_dim': args.embed_dim,
+        'num_heads': args.num_heads,
+        'mlp_ratio': args.mlp_ratio
+    }
+    
+    if args.model_type == 'original':
+        model = SwinIRMulti(**base_params)
+    else:  # enhanced
+        from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
+        model = SwinIRMultiEnhanced(**base_params)
+    
+    return model
+
 def main():
     args = parse_args()
     
@@ -350,21 +379,19 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # 创建模型
-    model = SwinIRMulti(
-        img_size=args.img_size,
-        in_chans=args.in_chans,
-        upscale=args.upscale,
-        window_size=args.window_size,
-        img_range=args.img_range,
-        depths=args.depths,
-        embed_dim=args.embed_dim,
-        num_heads=args.num_heads,
-        mlp_ratio=args.mlp_ratio,
-        upsampler=args.upsampler
-    )
+    model = create_model(args)
     
     # 加载模型
-    checkpoint = torch.load(args.model_path, map_location=device)
+    print(f"Loading model from {args.model_path}")
+    try:
+        # 首先尝试使用 weights_only=True 加载
+        checkpoint = torch.load(args.model_path, map_location=device, weights_only=True)
+    except Exception as e:
+        print(f"Warning: Failed to load with weights_only=True: {e}")
+        print("Attempting to load with weights_only=False...")
+        # 如果失败，则使用 weights_only=False 加载
+        checkpoint = torch.load(args.model_path, map_location=device, weights_only=False)
+    
     print("Checkpoint keys:", checkpoint.keys())
     
     # 根据实际的键加载模型
