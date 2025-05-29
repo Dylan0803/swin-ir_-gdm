@@ -11,45 +11,68 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import MultiStepLR
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from models.network_swinir_multi import SwinIRMulti as net
+from models.network_swinir_multi import SwinIRMulti
+from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
 import logging
 import pandas as pd
 import time
 import shutil
+import torch.nn.functional as F
 
 def parse_args():
-    parser = argparse.ArgumentParser()
-    # 模型相关参数
-    parser.add_argument('--model_name', type=str, default='swinir_multi', help='模型名称')
-    parser.add_argument('--exp_name', type=str, default='nearest+conv_test', help='实验名称')
-    parser.add_argument('--upsampler', type=str, default='nearest+conv', 
-                       choices=['pixelshuffle', 'pixelshuffledirect', 'nearest+conv'],
-                       help='上采样器类型')
-    parser.add_argument('--scale', type=int, default=6, help='上采样倍数')
+    parser = argparse.ArgumentParser(description='Train SwinIR Multi-task Model')
     
-    # 数据相关参数
-    parser.add_argument('--data_path', type=str, 
-                       default='C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\normalized_augmented_dataset.h5',
-                       help='数据集路径')
-    parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
-    parser.add_argument('--patch_size', type=int, default=64, help='图像块大小')
+    # 模型选择参数
+    parser.add_argument('--model_type', type=str, default='original',
+                      choices=['original', 'enhanced'],
+                      help='选择模型类型: original 或 enhanced')
     
-    # 训练相关参数
-    parser.add_argument('--epochs', type=int, default=50, help='训练轮数')
-    parser.add_argument('--lr', type=float, default=0.0002, help='学习率')
-    parser.add_argument('--gdm_weight', type=float, default=1.0, help='GDM任务损失权重')
-    parser.add_argument('--gsl_weight', type=float, default=0.5, help='GSL任务损失权重')
+    # 数据参数
+    parser.add_argument('--data_path', type=str, required=True,
+                      help='path to the dataset')
+    parser.add_argument('--save_dir', type=str, required=True,
+                      help='directory to save results')
+    parser.add_argument('--batch_size', type=int, default=32,
+                      help='batch size')
+    parser.add_argument('--num_epochs', type=int, default=100,
+                      help='number of epochs')
     
-    # 保存相关参数
-    parser.add_argument('--save_dir', type=str, default='./experiments', help='保存目录')
-    parser.add_argument('--save_interval', type=int, default=10, help='保存间隔')
+    # 模型配置参数
+    parser.add_argument('--img_size', type=int, default=16,
+                      help='input image size')
+    parser.add_argument('--in_chans', type=int, default=1,
+                      help='number of input channels')
+    parser.add_argument('--upscale', type=int, default=6,
+                      help='upscale factor')
+    parser.add_argument('--window_size', type=int, default=8,
+                      help='window size')
+    parser.add_argument('--img_range', type=float, default=1.,
+                      help='image range')
+    parser.add_argument('--depths', type=list, default=[6, 6, 6, 6],
+                      help='depths of each Swin Transformer layer')
+    parser.add_argument('--embed_dim', type=int, default=60,
+                      help='embedding dimension')
+    parser.add_argument('--num_heads', type=list, default=[6, 6, 6, 6],
+                      help='number of attention heads')
+    parser.add_argument('--mlp_ratio', type=float, default=2.,
+                      help='ratio of mlp hidden dim to embedding dim')
+    parser.add_argument('--upsampler', type=str, default='nearest+conv',
+                      help='upsampler type')
     
-    return parser.parse_args()
+    # 优化器参数
+    parser.add_argument('--lr', type=float, default=1e-4,
+                      help='learning rate')
+    parser.add_argument('--weight_decay', type=float, default=0,
+                      help='weight decay')
+    
+    args = parser.parse_args()
+    return args
 
 def set_seed(seed):
     random.seed(seed)
@@ -71,40 +94,57 @@ def calculate_psnr(img1, img2):
 def calculate_position_error(pred_pos, gt_pos):
     return torch.sqrt(torch.sum((pred_pos - gt_pos) ** 2, dim=1))
 
-def train_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, optimizer, device, epoch, total_epochs, args):
-    """
-    训练一个epoch
+def create_model(args):
+    """根据参数创建模型"""
+    model_params = {
+        'img_size': args.img_size,
+        'in_chans': args.in_chans,
+        'upscale': args.upscale,
+        'window_size': args.window_size,
+        'img_range': args.img_range,
+        'depths': args.depths,
+        'embed_dim': args.embed_dim,
+        'num_heads': args.num_heads,
+        'mlp_ratio': args.mlp_ratio,
+        'upsampler': args.upsampler
+    }
     
-    参数:
-        model: 模型
-        dataloader: 数据加载器
-        gdm_criterion: GDM任务的损失函数
-        gsl_criterion: GSL任务的损失函数
-        optimizer: 优化器
-        device: 设备
-        epoch: 当前epoch
-        total_epochs: 总epoch数
-        args: 训练参数
-    """
-    model.train()
-    epoch_gdm_loss = 0.0
-    epoch_gsl_loss = 0.0
-    epoch_total_loss = 0.0
+    if args.model_type == 'original':
+        model = SwinIRMulti(**model_params)
+    else:  # enhanced
+        model = SwinIRMultiEnhanced(**model_params)
     
-    # 使用tqdm创建进度条，添加更多信息
-    tbar = tqdm(dataloader, 
-                desc=f"Epoch {epoch+1}/{total_epochs}",
-                bar_format='{l_bar}{bar:30}{r_bar}',
-                ncols=100)
+    return model
+
+def train_model(model, train_loader, valid_loader, args):
+    """训练模型"""
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model.to(device)
     
-    for batch in tbar:
-        try:
-            # 数据预处理
+    # 定义损失函数
+    gdm_criterion = nn.MSELoss()  # 超分辨率重建损失
+    gsl_criterion = nn.MSELoss()  # 泄漏源定位损失
+    
+    # 定义优化器
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    
+    # 学习率调度器
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+    
+    # 训练循环
+    best_valid_loss = float('inf')
+    for epoch in range(args.num_epochs):
+        # 训练阶段
+        model.train()
+        train_loss = 0
+        train_gdm_loss = 0
+        train_gsl_loss = 0
+        
+        for batch in tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.num_epochs}'):
+            # 获取数据
             lr = batch['lr'].to(device)
             hr = batch['hr'].to(device)
             source_pos = batch['source_pos'].to(device)
-            
-            optimizer.zero_grad()
             
             # 前向传播
             gdm_out, gsl_out = model(lr)
@@ -112,91 +152,72 @@ def train_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, optimizer, 
             # 计算损失
             gdm_loss = gdm_criterion(gdm_out, hr)
             gsl_loss = gsl_criterion(gsl_out, source_pos)
-            total_loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
             
-            # 检查损失值
-            if torch.isnan(total_loss):
-                print(f"Warning: NaN loss detected! Skipping batch...")
-                continue
+            # 总损失
+            loss = gdm_loss + gsl_loss
             
-            total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            # 反向传播和优化
+            optimizer.zero_grad()
+            loss.backward()
             optimizer.step()
             
-            # 更新统计信息
-            epoch_gdm_loss += gdm_loss.item()
-            epoch_gsl_loss += gsl_loss.item()
-            epoch_total_loss += total_loss.item()
-            
-            # 更新进度条，显示更多信息
-            tbar.set_postfix({
-                'GDM': f"{gdm_loss.item():.4f}",
-                'GSL': f"{gsl_loss.item():.4f}",
-                'Total': f"{total_loss.item():.4f}",
-                'LR': f"{optimizer.param_groups[0]['lr']:.6f}"
-            })
-            
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            # 累计损失
+            train_loss += loss.item()
+            train_gdm_loss += gdm_loss.item()
+            train_gsl_loss += gsl_loss.item()
+        
+        # 计算平均训练损失
+        train_loss /= len(train_loader)
+        train_gdm_loss /= len(train_loader)
+        train_gsl_loss /= len(train_loader)
+        
+        # 验证阶段
+        model.eval()
+        valid_loss = 0
+        valid_gdm_loss = 0
+        valid_gsl_loss = 0
+        
+        with torch.no_grad():
+            for batch in valid_loader:
+                lr = batch['lr'].to(device)
+                hr = batch['hr'].to(device)
+                source_pos = batch['source_pos'].to(device)
                 
-        except RuntimeError as e:
-            if "out of memory" in str(e):
-                print(f"Warning: GPU OOM! Clearing cache and skipping batch...")
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                continue
-            else:
-                raise e
-    
-    return epoch_gdm_loss / len(dataloader), epoch_gsl_loss / len(dataloader), epoch_total_loss / len(dataloader)
-
-@torch.no_grad()
-def valid_one_epoch(model, dataloader, gdm_criterion, gsl_criterion, device, args):
-    """
-    验证一个epoch
-    
-    参数:
-        model: 模型
-        dataloader: 数据加载器
-        gdm_criterion: GDM任务的损失函数
-        gsl_criterion: GSL任务的损失函数
-        device: 设备
-        args: 训练参数
-    """
-    model.eval()
-    epoch_gdm_loss = 0.0
-    epoch_gsl_loss = 0.0
-    epoch_total_loss = 0.0
-    
-    # 为验证集也添加进度条
-    tbar = tqdm(dataloader, 
-                desc="Validating",
-                bar_format='{l_bar}{bar:30}{r_bar}',
-                ncols=100)
-    
-    for batch in tbar:
-        lr = batch['lr'].to(device)
-        hr = batch['hr'].to(device)
-        source_pos = batch['source_pos'].to(device)
+                gdm_out, gsl_out = model(lr)
+                
+                gdm_loss = gdm_criterion(gdm_out, hr)
+                gsl_loss = gsl_criterion(gsl_out, source_pos)
+                loss = gdm_loss + gsl_loss
+                
+                valid_loss += loss.item()
+                valid_gdm_loss += gdm_loss.item()
+                valid_gsl_loss += gsl_loss.item()
         
-        gdm_out, gsl_out = model(lr)
+        # 计算平均验证损失
+        valid_loss /= len(valid_loader)
+        valid_gdm_loss /= len(valid_loader)
+        valid_gsl_loss /= len(valid_loader)
         
-        gdm_loss = gdm_criterion(gdm_out, hr)
-        gsl_loss = gsl_criterion(gsl_out, source_pos)
-        total_loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
+        # 更新学习率
+        scheduler.step(valid_loss)
         
-        epoch_gdm_loss += gdm_loss.item()
-        epoch_gsl_loss += gsl_loss.item()
-        epoch_total_loss += total_loss.item()
+        # 打印训练信息
+        print(f'Epoch {epoch+1}/{args.num_epochs}:')
+        print(f'Train Loss: {train_loss:.4f} (GDM: {train_gdm_loss:.4f}, GSL: {train_gsl_loss:.4f})')
+        print(f'Valid Loss: {valid_loss:.4f} (GDM: {valid_gdm_loss:.4f}, GSL: {valid_gsl_loss:.4f})')
         
-        # 更新验证进度条
-        tbar.set_postfix({
-            'GDM': f"{gdm_loss.item():.4f}",
-            'GSL': f"{gsl_loss.item():.4f}",
-            'Total': f"{total_loss.item():.4f}"
-        })
-    
-    return epoch_gdm_loss / len(dataloader), epoch_gsl_loss / len(dataloader), epoch_total_loss / len(dataloader)
+        # 保存最佳模型
+        if valid_loss < best_valid_loss:
+            best_valid_loss = valid_loss
+            save_path = os.path.join(args.save_dir, f'best_model_{args.model_type}.pth')
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'train_loss': train_loss,
+                'valid_loss': valid_loss,
+            }, save_path)
+            print(f'Best model saved to {save_path}')
 
 def plot_metrics(args, train_metrics, valid_metrics, save_dir):
     """绘制训练指标曲线"""
@@ -294,149 +315,26 @@ def train(args):
     print(f"HR max position: [{sample['hr_max_pos'].min():.4f}, {sample['hr_max_pos'].max():.4f}]")
 
     # 创建模型
-    model = net(
-        img_size=args.patch_size,
-        patch_size=1,
-        in_chans=1,
-        embed_dim=60,
-        depths=[6, 6, 6, 6],
-        num_heads=[6, 6, 6, 6],
-        window_size=8,
-        mlp_ratio=2,
-        upscale=args.scale,
-        img_range=1.,
-        upsampler=args.upsampler,
-        resi_connection='1conv'
-    ).to(device)
+    model = create_model(args)
 
-    # 定义损失函数
-    criterion_gdm = nn.L1Loss()
-    criterion_gsl = nn.MSELoss()
-
-    # 定义优化器
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = MultiStepLR(optimizer, milestones=[20, 40], gamma=0.5)
-
-    # 创建保存目录
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    experiment_dir = os.path.join("experiments", f"{args.exp_name}_{timestamp}")
-    model_dir = os.path.join(experiment_dir, args.model_name)
-    os.makedirs(experiment_dir, exist_ok=True)
-    os.makedirs(model_dir, exist_ok=True)
-    
-    # 保存训练参数
-    save_args(args, model_dir)
-    
-    # 初始化训练历史
-    train_metrics = {'gdm_loss': [], 'gsl_loss': [], 'total_loss': []}
-    valid_metrics = {'gdm_loss': [], 'gsl_loss': [], 'total_loss': []}
-    best_loss = float('inf')
-    start_epoch = 0
-    
-    # 检查是否有checkpoint
-    checkpoint_path = os.path.join(model_dir, "latest_checkpoint.pth")
-    if os.path.exists(checkpoint_path):
-        print(f"Loading checkpoint from {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = checkpoint['epoch']
-        train_metrics = checkpoint['train_metrics']
-        valid_metrics = checkpoint['valid_metrics']
-        best_loss = checkpoint['best_loss']
-        print(f"Resuming from epoch {start_epoch}")
-    
-    # 训练循环
-    for epoch in range(start_epoch, args.epochs):
-        # 训练一个epoch
-        train_gdm_loss, train_gsl_loss, train_total_loss = train_one_epoch(
-            model, train_loader, criterion_gdm, criterion_gsl, optimizer, device, epoch, args.epochs, args)
-        
-        # 验证
-        valid_gdm_loss, valid_gsl_loss, valid_total_loss = valid_one_epoch(
-            model, valid_loader, criterion_gdm, criterion_gsl, device, args)
-        
-        # 更新训练历史
-        train_metrics['gdm_loss'].append(train_gdm_loss)
-        train_metrics['gsl_loss'].append(train_gsl_loss)
-        train_metrics['total_loss'].append(train_total_loss)
-        valid_metrics['gdm_loss'].append(valid_gdm_loss)
-        valid_metrics['gsl_loss'].append(valid_gsl_loss)
-        valid_metrics['total_loss'].append(valid_total_loss)
-        
-        # 打印训练信息
-        print(f"\nEpoch {epoch+1}/{args.epochs}")
-        print(f"Train - GDM Loss: {train_gdm_loss:.4f}, GSL Loss: {train_gsl_loss:.4f}, Total Loss: {train_total_loss:.4f}")
-        print(f"Valid - GDM Loss: {valid_gdm_loss:.4f}, GSL Loss: {valid_gsl_loss:.4f}, Total Loss: {valid_total_loss:.4f}")
-        print(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        # 保存最佳模型
-        if valid_total_loss < best_loss:
-            best_loss = valid_total_loss
-            torch.save(model.state_dict(), os.path.join(model_dir, "best_model.pth"))
-            print(f"Best model saved at epoch {epoch+1} with valid loss {best_loss:.4f}")
-        
-        # 保存checkpoint
-        checkpoint = {
-            'epoch': epoch + 1,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'train_metrics': train_metrics,
-            'valid_metrics': valid_metrics,
-            'best_loss': best_loss,
-            'args': args
-        }
-        torch.save(checkpoint, os.path.join(model_dir, "latest_checkpoint.pth"))
-        
-        # 每10个epoch保存一次历史checkpoint
-        if (epoch + 1) % 10 == 0:
-            history_checkpoint_path = os.path.join(model_dir, f"checkpoint_epoch_{epoch+1}.pth")
-            torch.save(checkpoint, history_checkpoint_path)
-            print(f"Checkpoint saved at epoch {epoch+1}")
-        
-        # 绘制和保存训练曲线
-        plot_metrics(args, train_metrics, valid_metrics, model_dir)
-        save_training_history(train_metrics, valid_metrics, model_dir)
-    
-    # 保存最佳模型副本
-    best_model_path = os.path.join(model_dir, "best_model.pth")
-    if os.path.exists(best_model_path):
-        shutil.copy2(best_model_path, os.path.join(experiment_dir, f"{args.model_name}_best_model.pth"))
-        print(f"Best model copy saved to: {os.path.join(experiment_dir, f'{args.model_name}_best_model.pth')}")
-    
-    print("\nTraining completed!")
-    print(f"Best validation loss: {best_loss:.4f}")
-    print(f"Model and checkpoints saved in {model_dir}")
-    
-    return model, train_metrics, valid_metrics, best_loss
+    # 训练模型
+    train_model(model, train_loader, valid_loader, args)
 
 def main():
-    # 定义命令行参数
-    parser = argparse.ArgumentParser()
+    args = parse_args()
     
-    # 模型相关参数
-    parser.add_argument('--model_name', type=str, required=True, help='模型名称')
-    parser.add_argument('--exp_name', type=str, default='default_experiment', help='实验名称')
-    parser.add_argument('--upsampler', type=str, default='nearest+conv', 
-                       choices=['pixelshuffle', 'pixelshuffledirect', 'nearest+conv'],
-                       help='上采样器类型')
-    parser.add_argument('--scale', type=int, default=6, help='上采样倍数')
+    # 创建保存目录
+    os.makedirs(args.save_dir, exist_ok=True)
     
-    # 数据相关参数
-    parser.add_argument('--data_path', type=str, required=True, help='h5 数据路径')
-    parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
-    parser.add_argument('--patch_size', type=int, default=16, help='LR图像的patch大小')
+    # 创建数据集和数据加载器
+    train_dataset, valid_dataset = generate_train_valid_dataset(args.data_path)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False)
     
-    # 训练相关参数
-    parser.add_argument('--epochs', type=int, default=50, help='训练轮数')
-    parser.add_argument('--lr', type=float, default=0.0002, help='学习率')
-    parser.add_argument('--gdm_weight', type=float, default=1.0, help='GDM任务损失权重')
-    parser.add_argument('--gsl_weight', type=float, default=0.5, help='GSL任务损失权重')
+    # 创建模型
+    model = create_model(args)
     
-    # 解析参数
-    args = parser.parse_args()
-    
-    # 开始训练
+    # 训练模型
     train(args)
 
 if __name__ == "__main__":
