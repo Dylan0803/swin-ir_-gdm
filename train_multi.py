@@ -122,6 +122,62 @@ def create_model(args):
     
     return model
 
+def plot_loss_lines(args, train_losses, valid_losses, train_gdm_losses, train_gsl_losses, 
+                    valid_gdm_losses, valid_gsl_losses, save_dir):
+    """绘制训练损失曲线"""
+    plt.figure(figsize=(15, 10))
+    
+    # 总损失
+    plt.subplot(221)
+    plt.plot(train_losses, label='Train Total Loss')
+    plt.plot(valid_losses, label='Valid Total Loss')
+    plt.title('Total Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    
+    # GDM损失
+    plt.subplot(222)
+    plt.plot(train_gdm_losses, label='Train GDM Loss')
+    plt.plot(valid_gdm_losses, label='Valid GDM Loss')
+    plt.title('GDM Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    
+    # GSL损失
+    plt.subplot(223)
+    plt.plot(train_gsl_losses, label='Train GSL Loss')
+    plt.plot(valid_gsl_losses, label='Valid GSL Loss')
+    plt.title('GSL Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'training_metrics.png'))
+    plt.close()
+
+def save_training_history(train_losses, valid_losses, train_gdm_losses, train_gsl_losses,
+                         valid_gdm_losses, valid_gsl_losses, save_dir):
+    """保存训练历史到CSV文件"""
+    history_df = pd.DataFrame({
+        'epoch': range(1, len(train_losses) + 1),
+        'train_total_loss': train_losses,
+        'valid_total_loss': valid_losses,
+        'train_gdm_loss': train_gdm_losses,
+        'train_gsl_loss': train_gsl_losses,
+        'valid_gdm_loss': valid_gdm_losses,
+        'valid_gsl_loss': valid_gsl_losses
+    })
+    history_df.to_csv(os.path.join(save_dir, 'training_history.csv'), index=False)
+
+def save_args(args, save_dir):
+    """保存训练参数"""
+    args_dict = vars(args)
+    with open(os.path.join(save_dir, 'training_args.json'), 'w') as f:
+        json.dump(args_dict, f, indent=4)
+
 def train_model(model, train_loader, valid_loader, args):
     """训练模型"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -137,9 +193,44 @@ def train_model(model, train_loader, valid_loader, args):
     # 学习率调度器
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
     
+    # 创建保存目录
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    experiment_dir = os.path.join(args.save_dir, f"{args.model_type}_{timestamp}")
+    os.makedirs(experiment_dir, exist_ok=True)
+    
+    # 保存训练参数
+    save_args(args, experiment_dir)
+    
+    # 初始化训练历史记录
+    train_losses = []
+    valid_losses = []
+    train_gdm_losses = []
+    train_gsl_losses = []
+    valid_gdm_losses = []
+    valid_gsl_losses = []
+    
     # 训练循环
     best_valid_loss = float('inf')
-    for epoch in range(args.num_epochs):
+    start_epoch = 0
+    
+    # 检查是否有checkpoint可以恢复
+    checkpoint_path = os.path.join(experiment_dir, "latest_checkpoint.pth")
+    if os.path.exists(checkpoint_path):
+        print(f"Loading checkpoint from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch']
+        train_losses = checkpoint['train_losses']
+        valid_losses = checkpoint['valid_losses']
+        train_gdm_losses = checkpoint['train_gdm_losses']
+        train_gsl_losses = checkpoint['train_gsl_losses']
+        valid_gdm_losses = checkpoint['valid_gdm_losses']
+        valid_gsl_losses = checkpoint['valid_gsl_losses']
+        best_valid_loss = checkpoint['best_valid_loss']
+        print(f"Resuming from epoch {start_epoch}")
+    
+    for epoch in range(start_epoch, args.num_epochs):
         # 训练阶段
         model.train()
         train_loss = 0
@@ -229,77 +320,80 @@ def train_model(model, train_loader, valid_loader, args):
         # 更新学习率
         scheduler.step(valid_loss)
         
+        # 记录损失
+        train_losses.append(train_loss)
+        valid_losses.append(valid_loss)
+        train_gdm_losses.append(train_gdm_loss)
+        train_gsl_losses.append(train_gsl_loss)
+        valid_gdm_losses.append(valid_gdm_loss)
+        valid_gsl_losses.append(valid_gsl_loss)
+        
         # 打印训练信息
         print(f'\nEpoch {epoch+1}/{args.num_epochs} Summary:')
         print(f'Train Loss: {train_loss:.4f} (GDM: {train_gdm_loss:.4f}, GSL: {train_gsl_loss:.4f})')
         print(f'Valid Loss: {valid_loss:.4f} (GDM: {valid_gdm_loss:.4f}, GSL: {valid_gsl_loss:.4f})')
         print(f'Current LR: {optimizer.param_groups[0]["lr"]:.6f}')
+        print(f'Epoch {epoch+1} finished at {time.strftime("%Y-%m-%d %H:%M:%S")}')
         
         # 保存最佳模型
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
-            save_path = os.path.join(args.save_dir, f'best_model_{args.model_type}.pth')
+            save_path = os.path.join(experiment_dir, f'best_model_{args.model_type}.pth')
             torch.save({
                 'epoch': epoch + 1,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'train_loss': train_loss,
                 'valid_loss': valid_loss,
-                'args': args,  # 保存训练参数
+                'args': args,
             }, save_path)
             print(f'Best model saved to {save_path}')
-
-def plot_metrics(args, train_metrics, valid_metrics, save_dir):
-    """绘制训练指标曲线"""
-    plt.figure(figsize=(15, 5))
+        
+        # 保存checkpoint
+        checkpoint = {
+            'epoch': epoch + 1,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'train_losses': train_losses,
+            'valid_losses': valid_losses,
+            'train_gdm_losses': train_gdm_losses,
+            'train_gsl_losses': train_gsl_losses,
+            'valid_gdm_losses': valid_gdm_losses,
+            'valid_gsl_losses': valid_gsl_losses,
+            'best_valid_loss': best_valid_loss,
+            'args': args
+        }
+        torch.save(checkpoint, os.path.join(experiment_dir, "latest_checkpoint.pth"))
+        
+        # 每10个epoch保存一次历史checkpoint
+        if (epoch + 1) % 10 == 0:
+            history_checkpoint_path = os.path.join(experiment_dir, f"checkpoint_epoch_{epoch+1}.pth")
+            torch.save(checkpoint, history_checkpoint_path)
+            print(f"Checkpoint saved at epoch {epoch+1}")
+        
+        # 绘制损失曲线
+        plot_loss_lines(args, train_losses, valid_losses, 
+                       train_gdm_losses, train_gsl_losses,
+                       valid_gdm_losses, valid_gsl_losses, 
+                       experiment_dir)
+        
+        # 保存训练历史
+        save_training_history(train_losses, valid_losses,
+                            train_gdm_losses, train_gsl_losses,
+                            valid_gdm_losses, valid_gsl_losses,
+                            experiment_dir)
     
-    # GDM损失
-    plt.subplot(131)
-    plt.plot(train_metrics['gdm_loss'], label='Train GDM Loss')
-    plt.plot(valid_metrics['gdm_loss'], label='Valid GDM Loss')
-    plt.title('GDM Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
+    # 训练完成后，保存一份最佳模型的副本
+    best_model_path = os.path.join(experiment_dir, f'best_model_{args.model_type}.pth')
+    if os.path.exists(best_model_path):
+        shutil.copy2(best_model_path, os.path.join(args.save_dir, f"{args.model_type}_best_model.pth"))
+        print(f"最佳模型副本已保存至: {os.path.join(args.save_dir, f'{args.model_type}_best_model.pth')}")
     
-    # GSL损失
-    plt.subplot(132)
-    plt.plot(train_metrics['gsl_loss'], label='Train GSL Loss')
-    plt.plot(valid_metrics['gsl_loss'], label='Valid GSL Loss')
-    plt.title('GSL Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
+    print("Training completed!")
+    print(f"Best validation loss: {best_valid_loss:.4f}")
+    print(f"Model and checkpoints saved in {experiment_dir}")
     
-    # 总损失
-    plt.subplot(133)
-    plt.plot(train_metrics['total_loss'], label='Train Total Loss')
-    plt.plot(valid_metrics['total_loss'], label='Valid Total Loss')
-    plt.title('Total Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, 'training_metrics.png'))
-    plt.close()
-
-def save_training_history(train_metrics, valid_metrics, save_dir):
-    """保存训练历史到CSV文件"""
-    history_df = pd.DataFrame({
-        'epoch': range(1, len(train_metrics['gdm_loss']) + 1),
-        'train_gdm_loss': train_metrics['gdm_loss'],
-        'train_gsl_loss': train_metrics['gsl_loss'],
-        'train_total_loss': train_metrics['total_loss'],
-        'valid_gdm_loss': valid_metrics['gdm_loss'],
-        'valid_gsl_loss': valid_metrics['gsl_loss'],
-        'valid_total_loss': valid_metrics['total_loss']
-    })
-    history_df.to_csv(os.path.join(save_dir, 'training_history.csv'), index=False)
-
-def save_args(args, model_dir):
-    # 实现保存参数的逻辑
-    pass
+    return model, train_losses, valid_losses, best_valid_loss
 
 def train(args):
     logging.basicConfig(level=logging.INFO)
@@ -347,7 +441,7 @@ def train(args):
     model = create_model(args)
 
     # 训练模型
-    train_model(model, train_loader, valid_loader, args)
+    model, train_losses, valid_losses, best_valid_loss = train_model(model, train_loader, valid_loader, args)
 
 def main():
     args = parse_args()
