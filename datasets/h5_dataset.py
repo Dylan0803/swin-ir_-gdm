@@ -6,7 +6,6 @@ from torch.utils.data import Dataset
 import h5py
 import numpy as np
 import random
-import os
 
 class MultiTaskDataset(Dataset):
     def __init__(self, dataset_file_name, index_list=None, shuffle=True):
@@ -25,8 +24,8 @@ class MultiTaskDataset(Dataset):
         # 遍历所有风场组
         for wind_group_name in self.dataset_file.keys():
             wind_group = self.dataset_file[wind_group_name]
-            # 获取所有源位置组
-            source_groups = [k for k in wind_group.keys() if k.startswith('s')]
+            # 获取所有源位置组（s1-s8）
+            source_groups = [f's{i}' for i in range(1, 9)]
             
             # 遍历所有源位置
             for source_group_name in source_groups:
@@ -66,6 +65,7 @@ class MultiTaskDataset(Dataset):
         - hr_tensor: 高分辨率数据 [1, H, W]，值范围[0,1]
         - source_pos: 泄漏源位置真值 [2]，值范围[0,1]
         - hr_max_pos: HR中浓度最高值的位置 [2]，值范围[0,1]
+        - wind_vector: 风场向量 [2]，值范围[-1,1]
         """
         try:
             idx_in_file = self.index_list[idx]
@@ -93,6 +93,11 @@ class MultiTaskDataset(Dataset):
             source_pos = source_pos / (width - 1)
             hr_max_pos = hr_max_pos / (width - 1)
             
+            # 读取风场信息
+            wind_velocity = wind_group['velocity'][:]  # 读取风场速度
+            # 归一化风场向量到[-1,1]范围
+            wind_vector = wind_velocity / np.max(np.abs(wind_velocity))
+            
             # 增加通道维度
             if len(lr.shape) == 2:
                 lr = lr[np.newaxis, :, :]
@@ -104,12 +109,14 @@ class MultiTaskDataset(Dataset):
             hr_tensor = torch.tensor(hr, dtype=torch.float32)
             source_pos_tensor = torch.tensor(source_pos, dtype=torch.float32)
             hr_max_pos_tensor = torch.tensor(hr_max_pos, dtype=torch.float32)
+            wind_vector_tensor = torch.tensor(wind_vector, dtype=torch.float32)
             
             return {
                 'lr': lr_tensor,          # 输入数据，已归一化到[0,1]
                 'hr': hr_tensor,          # 超分辨率任务的目标，已归一化到[0,1]
                 'source_pos': source_pos_tensor,  # 泄漏源位置真值，已归一化到[0,1]
-                'hr_max_pos': hr_max_pos_tensor  # HR中浓度最高位置，已归一化到[0,1]
+                'hr_max_pos': hr_max_pos_tensor,  # HR中浓度最高位置，已归一化到[0,1]
+                'wind_vector': wind_vector_tensor  # 风场向量，已归一化到[-1,1]
             }
         except Exception as e:
             print(f"错误：处理索引 {idx} 时发生错误: {str(e)}")
@@ -127,7 +134,7 @@ def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
         total_len = 0
         for wind_group_name in f.keys():
             wind_group = f[wind_group_name]
-            source_groups = [k for k in wind_group.keys() if k.startswith('s')]
+            source_groups = [f's{i}' for i in range(1, 9)]
             for source_group_name in source_groups:
                 try:
                     source_group = wind_group[source_group_name]
@@ -165,10 +172,13 @@ if __name__ == '__main__':
     print(f"HR数据形状: {sample['hr'].shape}")
     print(f"泄漏源位置真值: {sample['source_pos']}")
     print(f"HR最大浓度位置: {sample['hr_max_pos']}")
+    print(f"风场向量形状: {sample['wind_vector'].shape}")
     
     # 验证数据
     print("\n数据验证:")
     print(f"泄漏源位置真值类型: {sample['source_pos'].dtype}")
     print(f"HR最大浓度位置类型: {sample['hr_max_pos'].dtype}")
+    print(f"风场向量类型: {sample['wind_vector'].dtype}")
     print(f"LR数据范围: [{sample['lr'].min():.4f}, {sample['lr'].max():.4f}]")
     print(f"HR数据范围: [{sample['hr'].min():.4f}, {sample['hr'].max():.4f}]")
+    print(f"风场向量范围: [{sample['wind_vector'].min():.4f}, {sample['wind_vector'].max():.4f}]")

@@ -280,7 +280,7 @@ def train_model(model, train_loader, valid_loader, args):
         train_gsl_loss /= len(train_loader)
         
         # 验证阶段
-        model.eval()
+    model.eval()
         valid_loss = 0
         valid_gdm_loss = 0
         valid_gsl_loss = 0
