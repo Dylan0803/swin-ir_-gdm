@@ -45,7 +45,7 @@ def parse_args():
     
     # 模型配置参数
     parser.add_argument('--img_size', type=int, default=16,
-                      help='input image size')
+                      help='LR input image size (HR size will be img_size * upscale)')
     parser.add_argument('--in_chans', type=int, default=1,
                       help='number of input channels')
     parser.add_argument('--upscale', type=int, default=6,
@@ -70,6 +70,12 @@ def parse_args():
                       help='learning rate')
     parser.add_argument('--weight_decay', type=float, default=0,
                       help='weight decay')
+    
+    # 任务权重参数
+    parser.add_argument('--gdm_weight', type=float, default=1.0,
+                      help='weight for GDM (super-resolution) task')
+    parser.add_argument('--gsl_weight', type=float, default=0.5,
+                      help='weight for GSL (source localization) task')
     
     args = parser.parse_args()
     return args
@@ -153,8 +159,8 @@ def train_model(model, train_loader, valid_loader, args):
             gdm_loss = gdm_criterion(gdm_out, hr)
             gsl_loss = gsl_criterion(gsl_out, source_pos)
             
-            # 总损失
-            loss = gdm_loss + gsl_loss
+            # 总损失（加入权重）
+            loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
             
             # 反向传播和优化
             optimizer.zero_grad()
@@ -187,7 +193,7 @@ def train_model(model, train_loader, valid_loader, args):
                 
                 gdm_loss = gdm_criterion(gdm_out, hr)
                 gsl_loss = gsl_criterion(gsl_out, source_pos)
-                loss = gdm_loss + gsl_loss
+                loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
                 
                 valid_loss += loss.item()
                 valid_gdm_loss += gdm_loss.item()
@@ -205,6 +211,7 @@ def train_model(model, train_loader, valid_loader, args):
         print(f'Epoch {epoch+1}/{args.num_epochs}:')
         print(f'Train Loss: {train_loss:.4f} (GDM: {train_gdm_loss:.4f}, GSL: {train_gsl_loss:.4f})')
         print(f'Valid Loss: {valid_loss:.4f} (GDM: {valid_gdm_loss:.4f}, GSL: {valid_gsl_loss:.4f})')
+        print(f'Current LR: {optimizer.param_groups[0]["lr"]:.6f}')
         
         # 保存最佳模型
         if valid_loss < best_valid_loss:
@@ -216,6 +223,7 @@ def train_model(model, train_loader, valid_loader, args):
                 'optimizer_state_dict': optimizer.state_dict(),
                 'train_loss': train_loss,
                 'valid_loss': valid_loss,
+                'args': args,  # 保存训练参数
             }, save_path)
             print(f'Best model saved to {save_path}')
 
