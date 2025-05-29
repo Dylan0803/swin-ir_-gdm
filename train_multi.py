@@ -95,7 +95,7 @@ def create_model(args):
         'mlp_ratio': 2.,  # MLP比率
     }
     
-    # 增强版模型参数
+    # 增强版模型参数 - 只保留基础参数和Swin Transformer相关参数
     enhanced_params = {
         **base_params,
         'window_size': 8,  # Swin Transformer窗口大小
@@ -103,10 +103,16 @@ def create_model(args):
         'embed_dim': 60,  # 嵌入维度
         'num_heads': [6, 6, 6, 6],  # 注意力头数
         'mlp_ratio': 2.,  # MLP比率
-        # 增强版特有的参数
-        'attention_channels': 32,  # 注意力机制的通道数
-        'fusion_channels': 64,    # 特征融合的通道数
-        'dropout_rate': 0.1,      # Dropout比率
+        'qkv_bias': True,
+        'qk_scale': None,
+        'drop_rate': 0.,
+        'attn_drop_rate': 0.,
+        'drop_path_rate': 0.1,
+        'norm_layer': nn.LayerNorm,
+        'ape': False,
+        'patch_norm': True,
+        'use_checkpoint': False,
+        'resi_connection': '1conv'
     }
     
     if args.model_type == 'original':
