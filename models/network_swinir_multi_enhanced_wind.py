@@ -123,6 +123,10 @@ class SwinIRMultiEnhancedWind(SwinIRMulti):
             num_sources=1
         )
         
+        # 确保upsample属性存在
+        if not hasattr(self, 'upsample'):
+            self.upsample = self.upsampler
+        
     def forward(self, x, wind_vector=None):
         # 特征提取
         x = self.conv_first(x)
