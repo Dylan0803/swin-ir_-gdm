@@ -211,7 +211,7 @@ def train_epoch(model, train_loader, criterion_gdm, criterion_gsl, optimizer, de
     for batch in progress_bar:
         lr = batch['lr'].to(device)
         hr = batch['hr'].to(device)
-        position = batch['position'].to(device)
+        position = batch['source_pos'].to(device)
         wind_vector = batch.get('wind_vector', None)
         if wind_vector is not None:
             wind_vector = wind_vector.to(device)
@@ -257,7 +257,7 @@ def validate(model, valid_loader, criterion_gdm, criterion_gsl, device, args):
         for batch in progress_bar:
             lr = batch['lr'].to(device)
             hr = batch['hr'].to(device)
-            position = batch['position'].to(device)
+            position = batch['source_pos'].to(device)
             wind_vector = batch.get('wind_vector', None)
             if wind_vector is not None:
                 wind_vector = wind_vector.to(device)
