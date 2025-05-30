@@ -126,8 +126,12 @@ class SwinTransformerBlock(nn.Module):
     def forward(self, x, x_size):
         H, W = x_size
         B, L, C = x.shape
-        assert L == H * W, "input feature has wrong size"
-
+        
+        # 确保输入特征的大小正确
+        if L != H * W:
+            x = x.view(B, H, W, C)
+            x = x.reshape(B, H * W, C)
+        
         shortcut = x
         x = self.norm1(x)
         x = x.view(B, H, W, C)
