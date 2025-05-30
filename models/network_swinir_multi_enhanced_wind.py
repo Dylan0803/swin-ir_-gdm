@@ -1,27 +1,31 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models.network_swinir import SwinIR
-from models.network_swinir_multi import SwinIRMulti
+from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
 
 class WindGuidedAttention(nn.Module):
     """风场引导的注意力模块"""
-    def __init__(self, in_channels, wind_channels=2):
+    def __init__(self, in_channels):
         super(WindGuidedAttention, self).__init__()
+        # 风场信息处理
         self.wind_processor = nn.Sequential(
-            nn.Conv2d(wind_channels, 32, kernel_size=3, padding=1),
+            nn.Conv2d(2, 32, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(64, in_channels, kernel_size=1)
         )
         
+        # 注意力生成
         self.attention = nn.Sequential(
             nn.Conv2d(in_channels * 2, in_channels, kernel_size=1),
             nn.Sigmoid()
         )
         
     def forward(self, x, wind_vector):
+        if wind_vector is None:
+            return x
+            
         # 处理风场信息
         wind_features = self.wind_processor(wind_vector)
         # 生成注意力图
@@ -87,9 +91,8 @@ class EnhancedGSLBranchWithWind(nn.Module):
         # 特征融合
         fused = self.fusion(torch.cat([feat1, feat2, feat3], dim=1))
         
-        # 如果有风场信息，使用风场引导
-        if wind_vector is not None:
-            fused = self.wind_attention(fused, wind_vector)
+        # 应用风场引导
+        fused = self.wind_attention(fused, wind_vector)
         
         # 预测多个泄漏源位置和置信度
         positions = []
@@ -113,7 +116,7 @@ class EnhancedGSLBranchWithWind(nn.Module):
         
         return best_positions.squeeze(1), best_confidences.squeeze(1)
 
-class SwinIRMultiEnhancedWind(SwinIRMulti):
+class SwinIRMultiEnhancedWind(SwinIRMultiEnhanced):
     """增强的SwinIR多任务模型，支持风场引导"""
     def __init__(self, *args, **kwargs):
         super(SwinIRMultiEnhancedWind, self).__init__(*args, **kwargs)
@@ -124,21 +127,18 @@ class SwinIRMultiEnhancedWind(SwinIRMulti):
         )
         
     def forward(self, x, wind_vector=None):
-        # 特征提取
+        # 使用父类的特征提取
         x = self.conv_first(x)
         x = self.conv_after_body(self.forward_features(x))
         
         # 保存特征用于GSL任务
         gsl_features = x
         
-        # 使用父类的上采样模块
+        # 使用父类的上采样
         if hasattr(self, 'upsampler') and not isinstance(self.upsampler, str):
             x = self.upsampler(x)
         else:
-            # 如果没有上采样模块，使用父类的forward方法
-            x = super().forward(x)
-            if isinstance(x, tuple):
-                x = x[0]
+            # 如果没有上采样模块，直接返回
             return x, None, None
         
         # GDM任务
@@ -147,4 +147,4 @@ class SwinIRMultiEnhancedWind(SwinIRMulti):
         # GSL任务
         gsl_pos, gsl_conf = self.gsl_branch(gsl_features, wind_vector)
         
-        return gdm_output, gsl_pos, gsl_conf 
+        return gdm_output, gsl_pos, gsl_conf
