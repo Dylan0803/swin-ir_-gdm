@@ -127,18 +127,21 @@ class SwinIRMultiEnhancedWind(SwinIRMultiEnhanced):
         )
         
     def forward(self, x, wind_vector=None):
-        # 使用父类的特征提取
+        # 特征提取
         x = self.conv_first(x)
         x = self.conv_after_body(self.forward_features(x))
         
         # 保存特征用于GSL任务
         gsl_features = x
         
-        # 使用父类的上采样
+        # 上采样
         if hasattr(self, 'upsampler') and not isinstance(self.upsampler, str):
             x = self.upsampler(x)
         else:
-            # 如果没有上采样模块，直接返回
+            # 如果没有上采样模块，使用父类的forward方法
+            x = super().forward(x)
+            if isinstance(x, tuple):
+                x = x[0]
             return x, None, None
         
         # GDM任务
