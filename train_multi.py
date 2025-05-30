@@ -18,6 +18,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
+from models.network_swinir_multi_enhanced_wind import SwinIRMultiEnhancedWind
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
 import logging
 import pandas as pd
