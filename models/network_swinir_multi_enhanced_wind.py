@@ -129,18 +129,11 @@ class SwinIRMultiEnhancedWind(SwinIRMulti):
         x = self.conv_after_body(self.forward_features(x))
         
         # 使用父类的上采样方法
-        if self.upsampler == 'pixelshuffledirect':
-            x = self.upsampler(x)
-        elif self.upsampler == 'pixelshuffle_aux':
-            x = self.upsampler(x)
-        elif self.upsampler == 'pixelshuffle_hf':
-            x = self.upsampler(x)
-        elif self.upsampler == 'pixelshuffledirect_fea':
-            x = self.upsampler(x)
-        elif self.upsampler == 'nearest+conv':
-            x = self.upsampler(x)
+        if hasattr(self, 'upsample'):
+            x = self.upsample(x)
         else:
-            x = self.upsampler(x)
+            # 如果没有upsample属性，使用父类的forward方法
+            x = super().forward(x)
         
         # GDM任务
         gdm_output = self.conv_last(x)
