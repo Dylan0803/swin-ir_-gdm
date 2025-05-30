@@ -138,10 +138,7 @@ class SwinIRMultiEnhancedWind(SwinIRMultiEnhanced):
         if hasattr(self, 'upsampler') and not isinstance(self.upsampler, str):
             x = self.upsampler(x)
         else:
-            # 如果没有上采样模块，使用父类的forward方法
-            x = super().forward(x)
-            if isinstance(x, tuple):
-                x = x[0]
+            # 如果没有上采样模块，直接返回
             return x, None, None
         
         # GDM任务
