@@ -124,26 +124,14 @@ class SwinIRMultiEnhancedWind(SwinIRMulti):
         )
         
     def forward(self, x, wind_vector=None):
-        # 特征提取
-        x = self.conv_first(x)
-        x = self.conv_after_body(self.forward_features(x))
+        # 使用父类的特征提取和上采样
+        x = super().forward(x)
         
-        # 上采样
-        if self.upsampler == 'pixelshuffledirect':
-            x = self.upsampler(x)
-        elif self.upsampler == 'pixelshuffle_aux':
-            x = self.upsampler(x)
-        elif self.upsampler == 'pixelshuffle_hf':
-            x = self.upsampler(x)
-        elif self.upsampler == 'pixelshuffledirect_fea':
-            x = self.upsampler(x)
-        elif self.upsampler == 'nearest+conv':
-            x = self.upsampler(x)
-        
-        # GDM任务
-        gdm_output = self.conv_last(x)
-        
+        # 如果输入是元组（来自父类的forward），取第一个元素
+        if isinstance(x, tuple):
+            x = x[0]
+            
         # GSL任务
         gsl_pos, gsl_conf = self.gsl_branch(x, wind_vector)
         
-        return gdm_output, gsl_pos, gsl_conf 
+        return x, gsl_pos, gsl_conf 
