@@ -18,7 +18,6 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
-from models.network_swinir_multi_enhanced_wind import SwinIRMultiEnhancedWind
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
 import logging
 import pandas as pd
@@ -30,9 +29,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train SwinIR Multi-task Model')
     
     # 模型选择参数
-    parser.add_argument('--model_type', type=str, default='enhanced',
-                      choices=['original', 'enhanced', 'wind'],
-                      help='选择模型类型: original, enhanced 或 wind')
+    parser.add_argument('--model_type', type=str, default='original',
+                      choices=['original', 'enhanced'],
+                      help='选择模型类型: original 或 enhanced')
     
     # 数据参数
     parser.add_argument('--data_path', type=str, required=True,
@@ -96,34 +95,14 @@ def create_model(args):
         'mlp_ratio': 2.,  # MLP比率
     }
     
-    # 增强版模型参数
+    # 增强版模型参数 - 只保留基础参数和Swin Transformer相关参数
     enhanced_params = {
         **base_params,
-        'window_size': 8,
-        'depths': [6, 6, 6, 6],
-        'embed_dim': 60,
-        'num_heads': [6, 6, 6, 6],
-        'mlp_ratio': 2.,
-        'qkv_bias': True,
-        'qk_scale': None,
-        'drop_rate': 0.,
-        'attn_drop_rate': 0.,
-        'drop_path_rate': 0.1,
-        'norm_layer': nn.LayerNorm,
-        'ape': False,
-        'patch_norm': True,
-        'use_checkpoint': False,
-        'resi_connection': '1conv'
-    }
-    
-    # 风场引导模型参数
-    wind_params = {
-        **base_params,
-        'window_size': 8,
-        'depths': [6, 6, 6, 6],
-        'embed_dim': 60,
-        'num_heads': [6, 6, 6, 6],
-        'mlp_ratio': 2.,
+        'window_size': 8,  # Swin Transformer窗口大小
+        'depths': [6, 6, 6, 6],  # Swin Transformer深度
+        'embed_dim': 60,  # 嵌入维度
+        'num_heads': [6, 6, 6, 6],  # 注意力头数
+        'mlp_ratio': 2.,  # MLP比率
         'qkv_bias': True,
         'qk_scale': None,
         'drop_rate': 0.,
@@ -138,10 +117,8 @@ def create_model(args):
     
     if args.model_type == 'original':
         model = SwinIRMulti(**original_params)
-    elif args.model_type == 'enhanced':
+    else:  # enhanced
         model = SwinIRMultiEnhanced(**enhanced_params)
-    else:  # wind
-        model = SwinIRMultiEnhancedWind(**wind_params)
     
     return model
 
@@ -201,91 +178,6 @@ def save_args(args, save_dir):
     with open(os.path.join(save_dir, 'training_args.json'), 'w') as f:
         json.dump(args_dict, f, indent=4)
 
-def train_epoch(model, train_loader, criterion_gdm, criterion_gsl, optimizer, device, args):
-    model.train()
-    total_loss = 0
-    gdm_loss_sum = 0
-    gsl_loss_sum = 0
-    
-    progress_bar = tqdm(train_loader, desc='Training')
-    for batch in progress_bar:
-        lr = batch['lr'].to(device)
-        hr = batch['hr'].to(device)
-        position = batch['source_pos'].to(device)
-        wind_vector = batch.get('wind_vector', None)
-        if wind_vector is not None:
-            wind_vector = wind_vector.to(device)
-        
-        optimizer.zero_grad()
-        
-        # 前向传播
-        gdm_out, gsl_pos, gsl_conf = model(lr, wind_vector)
-        
-        # 计算损失
-        gdm_loss = criterion_gdm(gdm_out, hr)
-        gsl_loss, gsl_conf_loss = criterion_gsl(gsl_pos, gsl_conf, position)
-        
-        # 总损失
-        loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
-        
-        # 反向传播
-        loss.backward()
-        optimizer.step()
-        
-        # 更新统计信息
-        total_loss += loss.item()
-        gdm_loss_sum += gdm_loss.item()
-        gsl_loss_sum += gsl_loss.item()
-        
-        # 更新进度条
-        progress_bar.set_postfix({
-            'total_loss': f'{loss.item():.4f}',
-            'gdm_loss': f'{gdm_loss.item():.4f}',
-            'gsl_loss': f'{gsl_loss.item():.4f}'
-        })
-    
-    return total_loss / len(train_loader), gdm_loss_sum / len(train_loader), gsl_loss_sum / len(train_loader)
-
-def validate(model, valid_loader, criterion_gdm, criterion_gsl, device, args):
-    model.eval()
-    total_loss = 0
-    gdm_loss_sum = 0
-    gsl_loss_sum = 0
-    
-    with torch.no_grad():
-        progress_bar = tqdm(valid_loader, desc='Validation')
-        for batch in progress_bar:
-            lr = batch['lr'].to(device)
-            hr = batch['hr'].to(device)
-            position = batch['source_pos'].to(device)
-            wind_vector = batch.get('wind_vector', None)
-            if wind_vector is not None:
-                wind_vector = wind_vector.to(device)
-            
-            # 前向传播
-            gdm_out, gsl_pos, gsl_conf = model(lr, wind_vector)
-            
-            # 计算损失
-            gdm_loss = criterion_gdm(gdm_out, hr)
-            gsl_loss, gsl_conf_loss = criterion_gsl(gsl_pos, gsl_conf, position)
-            
-            # 总损失
-            loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
-            
-            # 更新统计信息
-            total_loss += loss.item()
-            gdm_loss_sum += gdm_loss.item()
-            gsl_loss_sum += gsl_loss.item()
-            
-            # 更新进度条
-            progress_bar.set_postfix({
-                'total_loss': f'{loss.item():.4f}',
-                'gdm_loss': f'{gdm_loss.item():.4f}',
-                'gsl_loss': f'{gsl_loss.item():.4f}'
-            })
-    
-    return total_loss / len(valid_loader), gdm_loss_sum / len(valid_loader), gsl_loss_sum / len(valid_loader)
-
 def train_model(model, train_loader, valid_loader, args):
     """训练模型"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -340,10 +232,90 @@ def train_model(model, train_loader, valid_loader, args):
     
     for epoch in range(start_epoch, args.num_epochs):
         # 训练阶段
-        train_loss, train_gdm_loss, train_gsl_loss = train_epoch(model, train_loader, gdm_criterion, gsl_criterion, optimizer, device, args)
+        model.train()
+        train_loss = 0
+        train_gdm_loss = 0
+        train_gsl_loss = 0
+        
+        # 创建训练进度条
+        train_pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} [Train]',
+                         leave=True, ncols=100)
+        
+        for batch in train_pbar:
+            # 获取数据
+            lr = batch['lr'].to(device)
+            hr = batch['hr'].to(device)
+            source_pos = batch['source_pos'].to(device)
+            
+            # 前向传播
+            gdm_out, gsl_out = model(lr)
+            
+            # 计算损失
+            gdm_loss = gdm_criterion(gdm_out, hr)
+            gsl_loss = gsl_criterion(gsl_out, source_pos)
+            
+            # 总损失（加入权重）
+            loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
+            
+            # 反向传播和优化
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            # 累计损失
+            train_loss += loss.item()
+            train_gdm_loss += gdm_loss.item()
+            train_gsl_loss += gsl_loss.item()
+            
+            # 更新进度条
+            train_pbar.set_postfix({
+                'loss': f'{loss.item():.4f}',
+                'gdm_loss': f'{gdm_loss.item():.4f}',
+                'gsl_loss': f'{gsl_loss.item():.4f}'
+            })
+        
+        # 计算平均训练损失
+        train_loss /= len(train_loader)
+        train_gdm_loss /= len(train_loader)
+        train_gsl_loss /= len(train_loader)
         
         # 验证阶段
-        valid_loss, valid_gdm_loss, valid_gsl_loss = validate(model, valid_loader, gdm_criterion, gsl_criterion, device, args)
+        model.eval()
+        valid_loss = 0
+        valid_gdm_loss = 0
+        valid_gsl_loss = 0
+        
+        # 创建验证进度条
+        valid_pbar = tqdm(valid_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} [Valid]',
+                         leave=True, ncols=100)
+        
+        with torch.no_grad():
+            for batch in valid_pbar:
+                lr = batch['lr'].to(device)
+                hr = batch['hr'].to(device)
+                source_pos = batch['source_pos'].to(device)
+                
+                gdm_out, gsl_out = model(lr)
+                
+                gdm_loss = gdm_criterion(gdm_out, hr)
+                gsl_loss = gsl_criterion(gsl_out, source_pos)
+                loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
+                
+                valid_loss += loss.item()
+                valid_gdm_loss += gdm_loss.item()
+                valid_gsl_loss += gsl_loss.item()
+                
+                # 更新进度条
+                valid_pbar.set_postfix({
+                    'loss': f'{loss.item():.4f}',
+                    'gdm_loss': f'{gdm_loss.item():.4f}',
+                    'gsl_loss': f'{gsl_loss.item():.4f}'
+                })
+        
+        # 计算平均验证损失
+        valid_loss /= len(valid_loader)
+        valid_gdm_loss /= len(valid_loader)
+        valid_gsl_loss /= len(valid_loader)
         
         # 更新学习率
         scheduler.step(valid_loss)
@@ -371,14 +343,9 @@ def train_model(model, train_loader, valid_loader, args):
                 'epoch': epoch + 1,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'train_loss': train_losses,
-                'valid_loss': valid_losses,
-                'train_gdm_losses': train_gdm_losses,
-                'train_gsl_losses': train_gsl_losses,
-                'valid_gdm_losses': valid_gdm_losses,
-                'valid_gsl_losses': valid_gsl_losses,
-                'best_valid_loss': best_valid_loss,
-                'args': args
+                'train_loss': train_loss,
+                'valid_loss': valid_loss,
+                'args': args,
             }, save_path)
             print(f'Best model saved to {save_path}')
         
