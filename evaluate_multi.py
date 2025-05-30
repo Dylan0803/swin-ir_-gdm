@@ -288,6 +288,9 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
         except KeyError as e:
             print(f"跳过无效数据: {e}")
             continue
+        except Exception as e:
+            print(f"处理样本时出错: {e}")
+            continue
     
     # 计算平均指标
     if valid_samples > 0:
