@@ -30,8 +30,8 @@ def parse_args():
     
     # 模型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced'],
-                      help='选择模型类型: original 或 enhanced')
+                      choices=['original', 'enhanced', 'wind'],
+                      help='选择模型类型: original, enhanced 或 wind')
     
     # 数据参数
     parser.add_argument('--data_path', type=str, required=True,
@@ -95,14 +95,34 @@ def create_model(args):
         'mlp_ratio': 2.,  # MLP比率
     }
     
-    # 增强版模型参数 - 只保留基础参数和Swin Transformer相关参数
+    # 增强版模型参数
     enhanced_params = {
         **base_params,
-        'window_size': 8,  # Swin Transformer窗口大小
-        'depths': [6, 6, 6, 6],  # Swin Transformer深度
-        'embed_dim': 60,  # 嵌入维度
-        'num_heads': [6, 6, 6, 6],  # 注意力头数
-        'mlp_ratio': 2.,  # MLP比率
+        'window_size': 8,
+        'depths': [6, 6, 6, 6],
+        'embed_dim': 60,
+        'num_heads': [6, 6, 6, 6],
+        'mlp_ratio': 2.,
+        'qkv_bias': True,
+        'qk_scale': None,
+        'drop_rate': 0.,
+        'attn_drop_rate': 0.,
+        'drop_path_rate': 0.1,
+        'norm_layer': nn.LayerNorm,
+        'ape': False,
+        'patch_norm': True,
+        'use_checkpoint': False,
+        'resi_connection': '1conv'
+    }
+    
+    # 风场引导模型参数
+    wind_params = {
+        **base_params,
+        'window_size': 8,
+        'depths': [6, 6, 6, 6],
+        'embed_dim': 60,
+        'num_heads': [6, 6, 6, 6],
+        'mlp_ratio': 2.,
         'qkv_bias': True,
         'qk_scale': None,
         'drop_rate': 0.,
@@ -117,8 +137,10 @@ def create_model(args):
     
     if args.model_type == 'original':
         model = SwinIRMulti(**original_params)
-    else:  # enhanced
+    elif args.model_type == 'enhanced':
         model = SwinIRMultiEnhanced(**enhanced_params)
+    else:  # wind
+        model = SwinIRMultiEnhancedWind(**wind_params)
     
     return model
 
@@ -247,15 +269,22 @@ def train_model(model, train_loader, valid_loader, args):
             hr = batch['hr'].to(device)
             source_pos = batch['source_pos'].to(device)
             
-            # 前向传播
-            gdm_out, gsl_out = model(lr)
+            # 对于风场模型，添加风场数据
+            if args.model_type == 'wind':
+                wind_vector = batch['wind_vector'].to(device)
+                gdm_out, gsl_pos, gsl_conf = model(lr, wind_vector)
+            else:
+                gdm_out, gsl_out = model(lr)
             
             # 计算损失
             gdm_loss = gdm_criterion(gdm_out, hr)
-            gsl_loss = gsl_criterion(gsl_out, source_pos)
-            
-            # 总损失（加入权重）
-            loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
+            if args.model_type == 'wind':
+                gsl_loss = gdm_criterion(gsl_pos, source_pos)
+                gsl_conf_loss = F.binary_cross_entropy(gsl_conf, torch.ones_like(gsl_conf))
+                loss = args.gdm_weight * gdm_loss + args.gsl_weight * (gsl_loss + 0.1 * gsl_conf_loss)
+            else:
+                gsl_loss = gsl_criterion(gsl_out, source_pos)
+                loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
             
             # 反向传播和优化
             optimizer.zero_grad()
@@ -280,7 +309,7 @@ def train_model(model, train_loader, valid_loader, args):
         train_gsl_loss /= len(train_loader)
         
         # 验证阶段
-    model.eval()
+        model.eval()
         valid_loss = 0
         valid_gdm_loss = 0
         valid_gsl_loss = 0
@@ -295,11 +324,21 @@ def train_model(model, train_loader, valid_loader, args):
                 hr = batch['hr'].to(device)
                 source_pos = batch['source_pos'].to(device)
                 
-                gdm_out, gsl_out = model(lr)
+                # 对于风场模型，添加风场数据
+                if args.model_type == 'wind':
+                    wind_vector = batch['wind_vector'].to(device)
+                    gdm_out, gsl_pos, gsl_conf = model(lr, wind_vector)
+                else:
+                    gdm_out, gsl_out = model(lr)
                 
                 gdm_loss = gdm_criterion(gdm_out, hr)
-                gsl_loss = gsl_criterion(gsl_out, source_pos)
-                loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
+                if args.model_type == 'wind':
+                    gsl_loss = gdm_criterion(gsl_pos, source_pos)
+                    gsl_conf_loss = F.binary_cross_entropy(gsl_conf, torch.ones_like(gsl_conf))
+                    loss = args.gdm_weight * gdm_loss + args.gsl_weight * (gsl_loss + 0.1 * gsl_conf_loss)
+                else:
+                    gsl_loss = gsl_criterion(gsl_out, source_pos)
+                    loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
                 
                 valid_loss += loss.item()
                 valid_gdm_loss += gdm_loss.item()
