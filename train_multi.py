@@ -18,6 +18,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
+from models.network_swinir_multi_enhanced_v2 import SwinIRMultiEnhancedV2
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
 import logging
 import pandas as pd
@@ -30,8 +31,8 @@ def parse_args():
     
     # 模型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced'],
-                      help='选择模型类型: original 或 enhanced')
+                      choices=['original', 'enhanced', 'enhanced_v2'],
+                      help='选择模型类型: original, enhanced 或 enhanced_v2')
     
     # 数据参数
     parser.add_argument('--data_path', type=str, required=True,
@@ -117,8 +118,10 @@ def create_model(args):
     
     if args.model_type == 'original':
         model = SwinIRMulti(**original_params)
-    else:  # enhanced
+    elif args.model_type == 'enhanced':
         model = SwinIRMultiEnhanced(**enhanced_params)
+    else:  # enhanced_v2
+        model = SwinIRMultiEnhancedV2(**enhanced_params)
     
     return model
 
