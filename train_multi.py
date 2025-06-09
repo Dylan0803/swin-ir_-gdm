@@ -93,10 +93,10 @@ def create_model(args):
         'depths': [6, 6, 6, 6],  # Swin Transformer深度
         'embed_dim': 60,  # 嵌入维度
         'num_heads': [6, 6, 6, 6],  # 注意力头数
-        'mlp_ratio': 2.,  # MLP比率
+        'mlp_ratio': 2.,  # MLP比率,
     }
     
-    # 增强版模型参数 - 只保留基础参数和Swin Transformer相关参数
+    # 增强版模型参数
     enhanced_params = {
         **base_params,
         'window_size': 8,  # Swin Transformer窗口大小
@@ -116,12 +116,21 @@ def create_model(args):
         'resi_connection': '1conv'
     }
     
+    # V2模型特定参数
+    enhanced_v2_params = {
+        **enhanced_params,
+        'upsampler': 'pixelshuffle',  # 使用pixelshuffle上采样
+        'high_freq_channels': 32,     # 高频分支通道数
+        'sparse_threshold': 0.05,     # 稀疏注意力阈值
+        'gated_upsample': True,       # 使用门控上采样
+    }
+    
     if args.model_type == 'original':
         model = SwinIRMulti(**original_params)
     elif args.model_type == 'enhanced':
         model = SwinIRMultiEnhanced(**enhanced_params)
     else:  # enhanced_v2
-        model = SwinIRMultiEnhancedV2(**enhanced_params)
+        model = SwinIRMultiEnhancedV2(**enhanced_v2_params)
     
     return model
 
