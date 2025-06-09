@@ -5,12 +5,16 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
+from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
+from models.network_swinir_multi_enhanced_v2 import SwinIRMultiEnhancedV2
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
 import pandas as pd
 import h5py
 import argparse
 import torch.nn as nn
 import torch.nn.functional as F
+from skimage.metrics import structural_similarity as ssim
+from skimage.metrics import peak_signal_noise_ratio as psnr
 
 def evaluate_model(model, dataloader, device):
     """
@@ -313,40 +317,18 @@ def parse_args():
     
     # 添加模型类型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced'],
-                      help='选择模型类型: original 或 enhanced')
+                      choices=['original', 'enhanced', 'enhanced_v2'],
+                      help='选择模型类型: original, enhanced, or enhanced_v2')
     
     # 添加缺失的参数
-    parser.add_argument('--img_size', type=int, default=16,
-                      help='input image size')
-    parser.add_argument('--in_chans', type=int, default=1,
-                      help='number of input channels')
-    parser.add_argument('--upscale', type=int, default=6,
-                      help='upscale factor')
-    parser.add_argument('--window_size', type=int, default=8,
-                      help='window size')
-    parser.add_argument('--img_range', type=float, default=1.,
-                      help='image range')
-    parser.add_argument('--depths', type=list, default=[6, 6, 6, 6],
-                      help='depths of each Swin Transformer layer')
-    parser.add_argument('--embed_dim', type=int, default=60,
-                      help='embedding dimension')
-    parser.add_argument('--num_heads', type=list, default=[6, 6, 6, 6],
-                      help='number of attention heads')
-    parser.add_argument('--mlp_ratio', type=float, default=2.,
-                      help='ratio of mlp hidden dim to embedding dim')
-    parser.add_argument('--upsampler', type=str, default='nearest+conv',
-                      help='upsampler type')
-    
-    # 原有的参数
     parser.add_argument('--model_path', type=str, required=True,
-                      help='path to the model checkpoint')
+                      help='模型权重路径')
     parser.add_argument('--data_path', type=str, required=True,
-                      help='path to the dataset')
-    parser.add_argument('--save_dir', type=str, required=True,
-                      help='directory to save results')
-    parser.add_argument('--num_samples', type=int, default=5,
-                      help='number of samples to evaluate')
+                      help='数据集路径')
+    parser.add_argument('--save_dir', type=str, default='evaluation_results',
+                      help='评估结果保存目录')
+    parser.add_argument('--device', type=str, default='cuda',
+                      help='使用的设备')
     
     args = parser.parse_args()
     return args
@@ -355,23 +337,55 @@ def create_model(args):
     """根据参数创建模型"""
     # 基础模型参数
     base_params = {
-        'img_size': args.img_size,
-        'in_chans': args.in_chans,
-        'upscale': args.upscale,
-        'img_range': args.img_range,
-        'upsampler': args.upsampler,
-        'window_size': args.window_size,
-        'depths': args.depths,
-        'embed_dim': args.embed_dim,
-        'num_heads': args.num_heads,
-        'mlp_ratio': args.mlp_ratio
+        'img_size': 16,  # LR图像大小
+        'in_chans': 1,   # 输入通道数
+        'upscale': 6,    # 上采样倍数
+        'img_range': 1.,  # 图像范围
+        'upsampler': 'nearest+conv'  # 上采样器类型
+    }
+    
+    # 原始模型参数
+    original_params = {
+        **base_params,
+        'window_size': 8,  # Swin Transformer窗口大小
+        'depths': [6, 6, 6, 6],  # Swin Transformer深度
+        'embed_dim': 60,  # 嵌入维度
+        'num_heads': [6, 6, 6, 6],  # 注意力头数
+        'mlp_ratio': 2.,  # MLP比率,
+    }
+    
+    # 增强版模型参数
+    enhanced_params = {
+        **base_params,
+        'window_size': 8,  # Swin Transformer窗口大小
+        'depths': [6, 6, 6, 6],  # Swin Transformer深度
+        'embed_dim': 60,  # 嵌入维度
+        'num_heads': [6, 6, 6, 6],  # 注意力头数
+        'mlp_ratio': 2.,  # MLP比率
+        'qkv_bias': True,
+        'qk_scale': None,
+        'drop_rate': 0.,
+        'attn_drop_rate': 0.,
+        'drop_path_rate': 0.1,
+        'norm_layer': nn.LayerNorm,
+        'ape': False,
+        'patch_norm': True,
+        'use_checkpoint': False,
+        'resi_connection': '1conv'
+    }
+    
+    # V2模型特定参数
+    enhanced_v2_params = {
+        **enhanced_params,
+        'upsampler': 'pixelshuffle',  # 使用pixelshuffle上采样
     }
     
     if args.model_type == 'original':
-        model = SwinIRMulti(**base_params)
-    else:  # enhanced
-        from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
-        model = SwinIRMultiEnhanced(**base_params)
+        model = SwinIRMulti(**original_params)
+    elif args.model_type == 'enhanced':
+        model = SwinIRMultiEnhanced(**enhanced_params)
+    else:  # enhanced_v2
+        model = SwinIRMultiEnhancedV2(**enhanced_v2_params)
     
     return model
 
@@ -379,7 +393,7 @@ def main():
     args = parse_args()
     
     # 设置设备
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(args.device)
     
     # 创建模型
     model = create_model(args)
@@ -409,7 +423,7 @@ def main():
     model.eval()
     
     # 进行推理
-    infer_model(model, args.data_path, args.save_dir, args.num_samples)
+    infer_model(model, args.data_path, args.save_dir)
 
 if __name__ == '__main__':
     main()

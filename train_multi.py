@@ -248,7 +248,7 @@ def train_model(model, train_loader, valid_loader, args):
         
         # 创建训练进度条
         train_pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} [Train]',
-                         leave=True, ncols=100)
+                         leave=True, ncols=300)
         
         for batch in train_pbar:
             # 获取数据
@@ -296,7 +296,7 @@ def train_model(model, train_loader, valid_loader, args):
         
         # 创建验证进度条
         valid_pbar = tqdm(valid_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} [Valid]',
-                         leave=True, ncols=100)
+                         leave=True, ncols=300)
         
         with torch.no_grad():
             for batch in valid_pbar:
