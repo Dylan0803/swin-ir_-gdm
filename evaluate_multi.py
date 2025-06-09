@@ -15,6 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
+import random
 
 def evaluate_model(model, dataloader, device):
     """
@@ -195,7 +196,7 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     distance = np.sqrt(np.sum((pred_pos - true_pos) ** 2)) / 10.0
     return distance
 
-def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
+def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None):
     """
     模型推理函数
     
@@ -204,7 +205,7 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
         data_path: 数据路径
         save_dir: 保存结果的目录
         num_samples: 要评估的样本数量
-        use_valid: 是否使用验证集
+        sample_indices: 指定要评估的样本索引列表，如果为None则随机选择
     """
     # 创建保存目录
     os.makedirs(save_dir, exist_ok=True)
@@ -223,25 +224,27 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
     total_ssim = 0
     valid_samples = 0
     
-    # 处理指定数量的样本
-    for i, batch in enumerate(dataloader):
-        if i >= num_samples:
-            break
-            
+    # 如果提供了样本索引，则只评估指定的样本
+    if sample_indices is not None:
+        indices_to_evaluate = sample_indices
+    else:
+        # 否则随机选择指定数量的样本
+        indices_to_evaluate = list(range(len(dataset)))
+        if num_samples < len(indices_to_evaluate):
+            indices_to_evaluate = random.sample(indices_to_evaluate, num_samples)
+    
+    print(f"评估样本索引: {indices_to_evaluate}")
+    
+    # 处理指定索引的样本
+    for idx in indices_to_evaluate:
         try:
-            # 解包数据
-            if isinstance(batch, (list, tuple)):
-                lr, hr, source_pos = batch
-            else:
-                # 如果batch是字典，则按键获取数据
-                lr = batch['lr']
-                hr = batch['hr']
-                source_pos = batch['source_pos']
+            # 获取指定索引的样本
+            batch = dataset[idx]
             
             # 将数据移到设备上
-            lr = lr.to(device)
-            hr = hr.to(device)
-            source_pos = source_pos.to(device)
+            lr = batch['lr'].unsqueeze(0).to(device)  # 添加batch维度
+            hr = batch['hr'].unsqueeze(0).to(device)
+            source_pos = batch['source_pos'].unsqueeze(0).to(device)
             
             # 模型推理
             with torch.no_grad():
@@ -286,7 +289,7 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
             valid_samples += 1
             
             # 保存结果
-            save_path = os.path.join(save_dir, f'sample_{i+1}.png')
+            save_path = os.path.join(save_dir, f'sample_{idx}.png')
             visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path)
             
         except KeyError as e:
@@ -312,6 +315,48 @@ def infer_model(model, data_path, save_dir, num_samples=5, use_valid=True):
     else:
         print("没有有效的样本可供评估")
 
+def get_dataset_indices(sample_specs, dataset):
+    """
+    根据样本规格获取数据集中的实际索引
+    
+    参数:
+        sample_specs: 样本规格列表，每个规格格式为 "组名,源位置,时间步"
+        例如: ["wind1_0,s1,50", "wind2_0,s2,30"]
+        dataset: 数据集对象
+    
+    返回:
+        list: 实际的数据集索引列表
+    """
+    actual_indices = []
+    
+    # 如果没有指定样本规格，返回空列表
+    if not sample_specs:
+        return actual_indices
+    
+    # 遍历数据集找到匹配的索引
+    for idx in range(len(dataset)):
+        try:
+            # 获取当前样本的信息
+            data_info = dataset.data_indices[idx]
+            current_group = data_info['wind_group']
+            current_source = data_info['source_group']
+            current_time = data_info['time_step']
+            
+            # 检查是否匹配任何指定的样本规格
+            for spec in sample_specs:
+                group, source, time = spec.split(',')
+                if (current_group == group and 
+                    current_source == source and 
+                    int(current_time) == int(time)):
+                    actual_indices.append(idx)
+                    print(f"找到匹配样本: 组={current_group}, 源={current_source}, 时间步={current_time}, 索引={idx}")
+                    break
+        except Exception as e:
+            print(f"处理索引 {idx} 时出错: {e}")
+            continue
+    
+    return actual_indices
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Evaluate SwinIR Multi-task Model')
     
@@ -331,6 +376,8 @@ def parse_args():
                       help='使用的设备')
     parser.add_argument('--num_samples', type=int, default=5,
                       help='要评估的样本数量')
+    parser.add_argument('--sample_specs', type=str, default=None,
+                      help='要评估的样本规格，用分号分隔，例如：wind1_0,s1,50;wind2_0,s2,30')
     
     args = parser.parse_args()
     return args
@@ -425,8 +472,25 @@ def main():
     model = model.to(device)
     model.eval()
     
+    # 处理样本规格参数
+    sample_specs = None
+    if args.sample_specs is not None:
+        sample_specs = [spec.strip() for spec in args.sample_specs.split(';')]
+    
+    # 加载数据集
+    dataset = MultiTaskDataset(args.data_path)
+    
+    # 获取要评估的实际索引
+    indices_to_evaluate = get_dataset_indices(sample_specs, dataset)
+    
+    if not indices_to_evaluate:
+        print("没有找到匹配的样本！")
+        return
+    
+    print(f"找到 {len(indices_to_evaluate)} 个匹配的样本")
+    
     # 进行推理
-    infer_model(model, args.data_path, args.save_dir, args.num_samples)
+    infer_model(model, args.data_path, args.save_dir, args.num_samples, indices_to_evaluate)
 
 if __name__ == '__main__':
     main()
