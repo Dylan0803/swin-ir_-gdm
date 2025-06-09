@@ -120,9 +120,6 @@ def create_model(args):
     enhanced_v2_params = {
         **enhanced_params,
         'upsampler': 'pixelshuffle',  # 使用pixelshuffle上采样
-        'high_freq_channels': 32,     # 高频分支通道数
-        'sparse_threshold': 0.05,     # 稀疏注意力阈值
-        'gated_upsample': True,       # 使用门控上采样
     }
     
     if args.model_type == 'original':
