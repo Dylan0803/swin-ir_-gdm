@@ -259,8 +259,7 @@ class SwinIRMultiEnhancedV2(nn.Module):
                 use_checkpoint=use_checkpoint,
                 img_size=img_size,
                 patch_size=patch_size,
-                resi_connection=resi_connection,
-                attn_type='sparse'  # 使用稀疏注意力
+                resi_connection=resi_connection
             )
             self.layers.append(layer)
         
