@@ -395,7 +395,8 @@ def main():
     args = parse_args()
     
     # 设置设备
-    device = torch.device(args.device)
+    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
     
     # 创建模型
     model = create_model(args)
@@ -404,12 +405,12 @@ def main():
     print(f"Loading model from {args.model_path}")
     try:
         # 首先尝试使用 weights_only=True 加载
-        checkpoint = torch.load(args.model_path, map_location=device, weights_only=True)
+        checkpoint = torch.load(args.model_path, map_location='cpu', weights_only=True)
     except Exception as e:
         print(f"Warning: Failed to load with weights_only=True: {e}")
         print("Attempting to load with weights_only=False...")
         # 如果失败，则使用 weights_only=False 加载
-        checkpoint = torch.load(args.model_path, map_location=device, weights_only=False)
+        checkpoint = torch.load(args.model_path, map_location='cpu', weights_only=False)
     
     print("Checkpoint keys:", checkpoint.keys())
     
