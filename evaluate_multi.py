@@ -329,6 +329,8 @@ def parse_args():
                       help='评估结果保存目录')
     parser.add_argument('--device', type=str, default='cuda',
                       help='使用的设备')
+    parser.add_argument('--num_samples', type=int, default=5,
+                      help='要评估的样本数量')
     
     args = parser.parse_args()
     return args
@@ -423,7 +425,7 @@ def main():
     model.eval()
     
     # 进行推理
-    infer_model(model, args.data_path, args.save_dir)
+    infer_model(model, args.data_path, args.save_dir, args.num_samples)
 
 if __name__ == '__main__':
     main()
