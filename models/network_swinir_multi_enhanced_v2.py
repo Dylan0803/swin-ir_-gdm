@@ -96,18 +96,43 @@ class PixelShuffleUpsample(nn.Module):
     """改进的上采样模块，使用PixelShuffle和门控机制"""
     def __init__(self, scale, channels):
         super().__init__()
-        self.conv = nn.Conv2d(channels, channels * (scale ** 2), 3, 1, 1)
-        self.ps = nn.PixelShuffle(scale)
+        # 分步上采样：2×1.5×2 = 6
+        self.conv1 = nn.Conv2d(channels, channels * 4, 3, 1, 1)  # 2倍
+        self.ps1 = nn.PixelShuffle(2)
+        self.conv2 = nn.Conv2d(channels, channels * 2.25, 3, 1, 1)  # 1.5倍
+        self.ps2 = nn.PixelShuffle(1.5)
+        self.conv3 = nn.Conv2d(channels, channels * 4, 3, 1, 1)  # 2倍
+        self.ps3 = nn.PixelShuffle(2)
+        
+        # 改进的门控机制
         self.gate = nn.Sequential(
+            nn.Conv2d(channels, channels, 3, 1, 1),
+            nn.BatchNorm2d(channels),
+            nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(channels, channels, 3, 1, 1),
             nn.Sigmoid()
         )
         
     def forward(self, x):
-        x = self.conv(x)
-        x = self.ps(x)
+        # 保存输入特征
+        identity = x
+        
+        # 分步上采样
+        x = self.conv1(x)
+        x = self.ps1(x)
+        x = self.conv2(x)
+        x = self.ps2(x)
+        x = self.conv3(x)
+        x = self.ps3(x)
+        
+        # 门控机制
         g = self.gate(x)
-        return x * g
+        x = x * g
+        
+        # 残差连接
+        x = x + F.interpolate(identity, scale_factor=6, mode='bilinear')
+        
+        return x
 
 class EnhancedGSLBranch(nn.Module):
     """增强的GSL分支，学习气体分布整体特征与泄漏源位置的关系"""

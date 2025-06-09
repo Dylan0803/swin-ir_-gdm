@@ -120,6 +120,21 @@ def create_model(args):
     enhanced_v2_params = {
         **enhanced_params,
         'upsampler': 'pixelshuffle',  # 使用pixelshuffle上采样
+        'window_size': 8,  # 保持窗口大小
+        'depths': [6, 6, 6, 6],  # 保持深度
+        'embed_dim': 60,  # 保持嵌入维度
+        'num_heads': [6, 6, 6, 6],  # 保持注意力头数
+        'mlp_ratio': 2.,  # 保持MLP比率
+        'qkv_bias': True,
+        'qk_scale': None,
+        'drop_rate': 0.,
+        'attn_drop_rate': 0.,
+        'drop_path_rate': 0.1,
+        'norm_layer': nn.LayerNorm,
+        'ape': False,
+        'patch_norm': True,
+        'use_checkpoint': False,
+        'resi_connection': '1conv'
     }
     
     if args.model_type == 'original':
