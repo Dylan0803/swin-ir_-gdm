@@ -96,15 +96,19 @@ class PixelShuffleUpsample(nn.Module):
     """改进的上采样模块，使用PixelShuffle和门控机制"""
     def __init__(self, scale, channels):
         super().__init__()
-        # 分步上采样：2×1.5×2 = 6
+        # 对于6倍上采样，我们分三步进行：2×2×1.5 = 6
+        # 第一步：2倍上采样
         self.conv1 = nn.Conv2d(channels, channels * 4, 3, 1, 1)  # 2倍
         self.ps1 = nn.PixelShuffle(2)
-        self.conv2 = nn.Conv2d(channels, channels * 2.25, 3, 1, 1)  # 1.5倍
-        self.ps2 = nn.PixelShuffle(1.5)
-        self.conv3 = nn.Conv2d(channels, channels * 4, 3, 1, 1)  # 2倍
-        self.ps3 = nn.PixelShuffle(2)
         
-        # 改进的门控机制
+        # 第二步：2倍上采样
+        self.conv2 = nn.Conv2d(channels, channels * 4, 3, 1, 1)  # 2倍
+        self.ps2 = nn.PixelShuffle(2)
+        
+        # 第三步：1.5倍上采样（使用最近邻插值）
+        self.conv3 = nn.Conv2d(channels, channels, 3, 1, 1)
+        
+        # 门控机制
         self.gate = nn.Sequential(
             nn.Conv2d(channels, channels, 3, 1, 1),
             nn.BatchNorm2d(channels),
@@ -114,23 +118,21 @@ class PixelShuffleUpsample(nn.Module):
         )
         
     def forward(self, x):
-        # 保存输入特征
-        identity = x
-        
-        # 分步上采样
+        # 第一步：2倍上采样
         x = self.conv1(x)
         x = self.ps1(x)
+        
+        # 第二步：2倍上采样
         x = self.conv2(x)
         x = self.ps2(x)
-        x = self.conv3(x)
-        x = self.ps3(x)
         
-        # 门控机制
+        # 第三步：1.5倍上采样
+        x = self.conv3(x)
+        x = F.interpolate(x, scale_factor=1.5, mode='nearest')
+        
+        # 应用门控机制
         g = self.gate(x)
         x = x * g
-        
-        # 残差连接
-        x = x + F.interpolate(identity, scale_factor=6, mode='bilinear')
         
         return x
 
