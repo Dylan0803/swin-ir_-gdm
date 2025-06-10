@@ -124,37 +124,63 @@ class MultiTaskDataset(Dataset):
 
 def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
     """
+    按风场和源位置划分数据集，确保数据独立性
+    使用train_ratio=0.8时，将得到19组训练数据和5组验证数据
+    
+    参数：
     data_file: .h5 数据文件路径
-    train_ratio: 训练集比例，默认 0.8
+    train_ratio: 训练集比例，默认0.8
     shuffle: 是否打乱数据
     返回：训练集对象，验证集对象
     """
-    with h5py.File(data_file, 'r') as f:
-        # 计算总数据量
-        total_len = 0
-        for wind_group_name in f.keys():
-            wind_group = f[wind_group_name]
-            source_groups = [f's{i}' for i in range(1, 9)]
-            for source_group_name in source_groups:
-                try:
-                    source_group = wind_group[source_group_name]
-                    total_len += len([k for k in source_group.keys() if k.startswith('HR_')])
-                except Exception as e:
-                    print(f"警告：计算数据量时跳过组 {wind_group_name}/{source_group_name}: {str(e)}")
-                    continue
-        
-        index_list = list(range(total_len))
-        
-        if shuffle:
-            random.shuffle(index_list)
-        
-        split_idx = int(train_ratio * total_len)
-        train_list = index_list[:split_idx]
-        valid_list = index_list[split_idx:]
+    # 基础风场组（不包括增强）
+    base_wind_groups = ['wind1_0', 'wind2_0', 'wind3_0']
+    source_groups = [f's{i}' for i in range(1, 9)]
     
-    # 创建数据集实例
-    train_dataset = MultiTaskDataset(data_file, train_list, shuffle=False)
-    valid_dataset = MultiTaskDataset(data_file, valid_list, shuffle=False)
+    # 创建基础组
+    base_groups = []
+    for wind in base_wind_groups:
+        for source in source_groups:
+            base_groups.append((wind, source))
+    
+    # 随机打乱基础组
+    if shuffle:
+        random.shuffle(base_groups)
+    
+    # 计算训练集组数，确保得到19组
+    total_groups = len(base_groups)  # 24组
+    if abs(train_ratio - 0.8) < 1e-6:  # 如果比例接近0.8
+        train_group_count = 19  # 直接使用19
+    else:
+        # 使用向上取整，确保训练集不会太小
+        train_group_count = int(np.ceil(total_groups * train_ratio))
+    
+    # 划分训练集和验证集
+    train_base_groups = base_groups[:train_group_count]
+    valid_base_groups = base_groups[train_group_count:]
+    
+    # 为训练集添加增强数据
+    train_groups = []
+    for wind, source in train_base_groups:
+        # 添加原始数据
+        train_groups.append((wind, source))
+        # 添加增强数据
+        wind_idx = wind.split('_')[0]  # 提取风场编号
+        train_groups.extend([
+            (f'{wind_idx}_rot90', source),
+            (f'{wind_idx}_rot180', source),
+            (f'{wind_idx}_rot270', source),
+            (f'{wind_idx}_flip_h', source),
+            (f'{wind_idx}_flip_v', source)
+        ])
+    
+    # 验证集只使用原始数据
+    valid_groups = valid_base_groups
+    
+    # 创建数据集
+    train_dataset = MultiTaskDataset(data_file, train_groups, shuffle=True)
+    valid_dataset = MultiTaskDataset(data_file, valid_groups, shuffle=False)
+    
     return train_dataset, valid_dataset
 
 if __name__ == '__main__':
