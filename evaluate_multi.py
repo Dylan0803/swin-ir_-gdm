@@ -6,7 +6,6 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
-from models.network_swinir_multi_enhanced_v2 import SwinIRMultiEnhancedV2
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
 import pandas as pd
 import h5py
@@ -210,8 +209,8 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None):
     # 创建保存目录
     os.makedirs(save_dir, exist_ok=True)
     
-    # 加载数据集，设置shuffle=False确保数据不打乱
-    dataset = MultiTaskDataset(data_path, shuffle=False)
+    # 加载数据集
+    dataset = MultiTaskDataset(data_path)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
     
     # 设置设备
@@ -225,13 +224,12 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None):
     valid_samples = 0
     
     # 如果提供了样本索引，则只评估指定的样本
-    if sample_indices is not None:
+    if sample_indices is not None and len(sample_indices) > 0:
         indices_to_evaluate = sample_indices
     else:
-        # 否则随机选择指定数量的样本
         indices_to_evaluate = list(range(len(dataset)))
         if num_samples < len(indices_to_evaluate):
-            indices_to_evaluate = random.sample(indices_to_evaluate, num_samples)
+            indices_to_evaluate = indices_to_evaluate[:num_samples]
     
     print(f"评估样本索引: {indices_to_evaluate}")
     
@@ -362,8 +360,8 @@ def parse_args():
     
     # 添加模型类型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced', 'enhanced_v2'],
-                      help='选择模型类型: original, enhanced, or enhanced_v2')
+                      choices=['original', 'enhanced'],
+                      help='选择模型类型: original, enhanced')
     
     # 添加缺失的参数
     parser.add_argument('--model_path', type=str, required=True,
@@ -423,33 +421,10 @@ def create_model(args):
         'resi_connection': '1conv'
     }
     
-    # V2模型特定参数
-    enhanced_v2_params = {
-        **enhanced_params,
-        'upsampler': 'pixelshuffle',  # 使用pixelshuffle上采样
-        'window_size': 8,  # 保持窗口大小
-        'depths': [6, 6, 6, 6],  # 保持深度
-        'embed_dim': 60,  # 保持嵌入维度
-        'num_heads': [6, 6, 6, 6],  # 保持注意力头数
-        'mlp_ratio': 2.,  # 保持MLP比率
-        'qkv_bias': True,
-        'qk_scale': None,
-        'drop_rate': 0.,
-        'attn_drop_rate': 0.,
-        'drop_path_rate': 0.1,
-        'norm_layer': nn.LayerNorm,
-        'ape': False,
-        'patch_norm': True,
-        'use_checkpoint': False,
-        'resi_connection': '1conv'
-    }
-    
     if args.model_type == 'original':
         model = SwinIRMulti(**original_params)
-    elif args.model_type == 'enhanced':
+    else:  # enhanced
         model = SwinIRMultiEnhanced(**enhanced_params)
-    else:  # enhanced_v2
-        model = SwinIRMultiEnhancedV2(**enhanced_v2_params)
     
     return model
 

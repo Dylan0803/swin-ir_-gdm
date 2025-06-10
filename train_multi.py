@@ -18,7 +18,6 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
-from models.network_swinir_multi_enhanced_v2 import SwinIRMultiEnhancedV2
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
 import logging
 import pandas as pd
@@ -31,8 +30,8 @@ def parse_args():
     
     # 模型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced', 'enhanced_v2'],
-                      help='选择模型类型: original, enhanced 或 enhanced_v2')
+                      choices=['original', 'enhanced'],
+                      help='选择模型类型: original, enhanced')
     
     # 数据参数
     parser.add_argument('--data_path', type=str, required=True,
@@ -116,33 +115,10 @@ def create_model(args):
         'resi_connection': '1conv'
     }
     
-    # V2模型特定参数
-    enhanced_v2_params = {
-        **enhanced_params,
-        'upsampler': 'pixelshuffle',  # 使用pixelshuffle上采样
-        'window_size': 8,  # 保持窗口大小
-        'depths': [6, 6, 6, 6],  # 保持深度
-        'embed_dim': 60,  # 保持嵌入维度
-        'num_heads': [6, 6, 6, 6],  # 保持注意力头数
-        'mlp_ratio': 2.,  # 保持MLP比率
-        'qkv_bias': True,
-        'qk_scale': None,
-        'drop_rate': 0.,
-        'attn_drop_rate': 0.,
-        'drop_path_rate': 0.1,
-        'norm_layer': nn.LayerNorm,
-        'ape': False,
-        'patch_norm': True,
-        'use_checkpoint': False,
-        'resi_connection': '1conv'
-    }
-    
     if args.model_type == 'original':
         model = SwinIRMulti(**original_params)
-    elif args.model_type == 'enhanced':
+    else:  # enhanced
         model = SwinIRMultiEnhanced(**enhanced_params)
-    else:  # enhanced_v2
-        model = SwinIRMultiEnhancedV2(**enhanced_v2_params)
     
     return model
 
@@ -263,7 +239,7 @@ def train_model(model, train_loader, valid_loader, args):
         
         # 创建训练进度条
         train_pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} [Train]',
-                         leave=True, ncols=300)
+                         leave=True, ncols=150)
         
         for batch in train_pbar:
             # 获取数据
@@ -311,7 +287,7 @@ def train_model(model, train_loader, valid_loader, args):
         
         # 创建验证进度条
         valid_pbar = tqdm(valid_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} [Valid]',
-                         leave=True, ncols=300)
+                         leave=True, ncols=150)
         
         with torch.no_grad():
             for batch in valid_pbar:
