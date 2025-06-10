@@ -12,7 +12,7 @@ class MultiTaskDataset(Dataset):
         """
         参数：
         dataset_file_name：.h5 文件路径
-        index_list：用于指定使用哪些索引，默认使用全部
+        index_list：用于指定使用哪些索引，可以是整数列表或(wind_group, source_group)元组列表
         shuffle：是否在 index_list 内部进行打乱
         """
         super(MultiTaskDataset, self).__init__()
@@ -46,13 +46,22 @@ class MultiTaskDataset(Dataset):
         
         # 如果未指定索引列表，就使用全部数据
         if index_list is None:
-            index_list = list(range(len(self.data_indices)))
+            self.index_list = list(range(len(self.data_indices)))
+        else:
+            # 如果index_list是元组列表，需要转换为对应的索引
+            if isinstance(index_list[0], tuple):
+                self.index_list = []
+                for wind_group, source_group in index_list:
+                    # 找到所有匹配的索引
+                    for i, data_info in enumerate(self.data_indices):
+                        if data_info['wind_group'] == wind_group and data_info['source_group'] == source_group:
+                            self.index_list.append(i)
+            else:
+                self.index_list = index_list
         
         # 是否打乱索引
         if shuffle:
-            random.shuffle(index_list)
-        
-        self.index_list = index_list
+            random.shuffle(self.index_list)
 
     def __len__(self):
         return len(self.index_list)
