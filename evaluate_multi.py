@@ -209,8 +209,8 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None):
     # 创建保存目录
     os.makedirs(save_dir, exist_ok=True)
     
-    # 加载数据集
-    dataset = MultiTaskDataset(data_path)
+    # 加载数据集，设置shuffle=False确保数据不打乱
+    dataset = MultiTaskDataset(data_path, shuffle=False)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
     
     # 设置设备
@@ -315,44 +315,37 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None):
 
 def get_dataset_indices(sample_specs, dataset):
     """
-    根据样本规格获取数据集中的实际索引
-    
-    参数:
-        sample_specs: 样本规格列表，每个规格格式为 "组名,源位置,时间步"
-        例如: ["wind1_0,s1,50", "wind2_0,s2,30"]
-        dataset: 数据集对象
-    
-    返回:
-        list: 实际的数据集索引列表
+    根据样本规格获取数据集中的实际索引，严格按 sample_specs 顺序返回
+    只处理存在的数据，跳过不存在的组
     """
     actual_indices = []
-    
-    # 如果没有指定样本规格，返回空列表
     if not sample_specs:
         return actual_indices
-    
-    # 遍历数据集找到匹配的索引
+
+    # 先构建一个查找表，只包含存在的数据
+    index_map = {}
     for idx in range(len(dataset)):
         try:
-            # 获取当前样本的信息
             data_info = dataset.data_indices[idx]
-            current_group = data_info['wind_group']
-            current_source = data_info['source_group']
-            current_time = data_info['time_step']
-            
-            # 检查是否匹配任何指定的样本规格
-            for spec in sample_specs:
-                group, source, time = spec.split(',')
-                if (current_group == group and 
-                    current_source == source and 
-                    int(current_time) == int(time)):
-                    actual_indices.append(idx)
-                    print(f"找到匹配样本: 组={current_group}, 源={current_source}, 时间步={current_time}, 索引={idx}")
-                    break
-        except Exception as e:
-            print(f"处理索引 {idx} 时出错: {e}")
+            key = f"{data_info['wind_group']},{data_info['source_group']},{data_info['time_step']}"
+            index_map[key] = idx
+        except Exception:
+            # 静默跳过不存在的数据
             continue
-    
+
+    # 按 sample_specs 顺序查找，只处理存在的数据
+    for spec in sample_specs:
+        try:
+            idx = index_map.get(spec)
+            if idx is not None:
+                actual_indices.append(idx)
+                print(f"找到匹配样本: {spec}, 索引={idx}")
+            else:
+                print(f"未找到匹配样本: {spec}")
+        except Exception:
+            # 静默跳过不存在的数据
+            continue
+
     return actual_indices
 
 def parse_args():
