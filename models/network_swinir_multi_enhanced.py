@@ -1,4 +1,4 @@
-import math
+#原模型使用的上采样器earest+conv，先修改成原SwinIR的上采样器为PixelShuffle子像素卷积
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -178,14 +178,29 @@ class SwinIRMultiEnhanced(nn.Module):
             )
         
         # GDM分支 - 上采样重建
-        if self.upsampler == 'nearest+conv':
+        if self.upsampler == 'pixelshuffle':
             self.conv_before_upsample = nn.Sequential(
                 nn.Conv2d(embed_dim, 64, 3, 1, 1),
                 nn.LeakyReLU(inplace=True)
             )
-            self.conv_up1 = nn.Conv2d(64, 64, 3, 1, 1)
-            self.conv_up2 = nn.Conv2d(64, 64, 3, 1, 1)
-            self.conv_up3 = nn.Conv2d(64, 64, 3, 1, 1)
+            # 第一次上采样 (2x)
+            self.conv_up1 = nn.Sequential(
+                nn.Conv2d(64, 64 * 4, 3, 1, 1),
+                nn.PixelShuffle(2),
+                nn.LeakyReLU(inplace=True)
+            )
+            # 第二次上采样 (1.5x)
+            self.conv_up2 = nn.Sequential(
+                nn.Conv2d(64, 64 * 9, 3, 1, 1),
+                nn.PixelShuffle(3),
+                nn.LeakyReLU(inplace=True)
+            )
+            # 第三次上采样 (2x)
+            self.conv_up3 = nn.Sequential(
+                nn.Conv2d(64, 64 * 4, 3, 1, 1),
+                nn.PixelShuffle(2),
+                nn.LeakyReLU(inplace=True)
+            )
             self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
             self.conv_last = nn.Conv2d(64, in_chans, 3, 1, 1)
             self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
@@ -239,10 +254,10 @@ class SwinIRMultiEnhanced(nn.Module):
         # GDM分支 - 超分辨率重建
         gdm_out = shared_features
         gdm_out = self.conv_before_upsample(gdm_out)
-        gdm_out = self.lrelu(self.conv_up1(torch.nn.functional.interpolate(gdm_out, scale_factor=2, mode='nearest')))
+        gdm_out = self.conv_up1(gdm_out)
         if self.upscale == 6:
-            gdm_out = self.lrelu(self.conv_up2(torch.nn.functional.interpolate(gdm_out, scale_factor=1.5, mode='nearest')))
-            gdm_out = self.lrelu(self.conv_up3(torch.nn.functional.interpolate(gdm_out, scale_factor=2, mode='nearest')))
+            gdm_out = self.conv_up2(gdm_out)
+            gdm_out = self.conv_up3(gdm_out)
         gdm_out = self.conv_last(self.lrelu(self.conv_hr(gdm_out)))
         
         # 增强的GSL分支 - 泄漏源定位
