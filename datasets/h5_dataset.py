@@ -7,6 +7,23 @@ import h5py
 import numpy as np
 import random
 
+# 设置随机种子
+def set_seed(seed=42):
+    """
+    设置随机种子，确保结果可复现
+    
+    参数：
+    seed: 随机种子值，默认42
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
 class MultiTaskDataset(Dataset):
     def __init__(self, dataset_file_name, index_list=None, shuffle=True):
         """
@@ -122,13 +139,25 @@ class MultiTaskDataset(Dataset):
             print(f"错误：处理索引 {idx} 时发生错误: {str(e)}")
             raise
 
-def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
+def generate_train_valid_test_dataset(data_file, train_ratio=0.8, valid_ratio=0.1, shuffle=True, seed=42):
     """
+    生成训练集、验证集和测试集
+    
+    参数：
     data_file: .h5 数据文件路径
     train_ratio: 训练集比例，默认 0.8
+    valid_ratio: 验证集比例，默认 0.1（测试集比例将自动为 1 - train_ratio - valid_ratio）
     shuffle: 是否打乱数据
-    返回：训练集对象，验证集对象
+    seed: 随机种子，默认42
+    
+    返回：
+    train_dataset: 训练集对象
+    valid_dataset: 验证集对象
+    test_dataset: 测试集对象
     """
+    # 设置随机种子
+    set_seed(seed)
+    
     with h5py.File(data_file, 'r') as f:
         # 计算总数据量
         total_len = 0
@@ -148,25 +177,37 @@ def generate_train_valid_dataset(data_file, train_ratio=0.8, shuffle=True):
         if shuffle:
             random.shuffle(index_list)
         
-        split_idx = int(train_ratio * total_len)
-        train_list = index_list[:split_idx]
-        valid_list = index_list[split_idx:]
+        # 计算划分点
+        train_split = int(train_ratio * total_len)
+        valid_split = int((train_ratio + valid_ratio) * total_len)
+        
+        # 划分数据集
+        train_list = index_list[:train_split]
+        valid_list = index_list[train_split:valid_split]
+        test_list = index_list[valid_split:]
     
     # 创建数据集实例
     train_dataset = MultiTaskDataset(data_file, train_list, shuffle=False)
     valid_dataset = MultiTaskDataset(data_file, valid_list, shuffle=False)
-    return train_dataset, valid_dataset
+    test_dataset = MultiTaskDataset(data_file, test_list, shuffle=False)
+    
+    return train_dataset, valid_dataset, test_dataset
 
 if __name__ == '__main__':
+    # 设置随机种子
+    set_seed(42)
+    
     # 测试数据集加载
     h5_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\normalized_augmented_dataset.h5'
     
     # 创建数据集实例
-    dataset = MultiTaskDataset(h5_path)
-    print(f"数据集大小: {len(dataset)}")
+    train_dataset, valid_dataset, test_dataset = generate_train_valid_test_dataset(h5_path, seed=42)
+    print(f"训练集大小: {len(train_dataset)}")
+    print(f"验证集大小: {len(valid_dataset)}")
+    print(f"测试集大小: {len(test_dataset)}")
     
     # 获取一个样本
-    sample = dataset[0]
+    sample = train_dataset[0]
     print("\n样本信息:")
     print(f"LR数据形状: {sample['lr'].shape}")
     print(f"HR数据形状: {sample['hr'].shape}")
