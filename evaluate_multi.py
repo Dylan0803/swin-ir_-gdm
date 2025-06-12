@@ -367,8 +367,17 @@ def parse_args():
                       help='使用的设备')
     parser.add_argument('--num_samples', type=int, default=5,
                       help='要评估的样本数量')
+    
+    # 测试模式选择
+    parser.add_argument('--test_mode', type=str, default='generalization',
+                      choices=['generalization', 'test_set'],
+                      help='测试模式：generalization（泛化测试）或 test_set（测试集）')
+    
+    # 样本选择参数
     parser.add_argument('--sample_specs', type=str, default=None,
-                      help='要评估的样本规格，用分号分隔，例如：wind1_0,s1,50;wind2_0,s2,30')
+                      help='泛化测试的样本规格，用分号分隔，例如：wind1_0,s1,50;wind2_0,s2,30')
+    parser.add_argument('--test_indices', type=str, default=None,
+                      help='测试集索引，用逗号分隔，例如：1,2,3,4,5')
     
     args = parser.parse_args()
     return args
@@ -421,6 +430,35 @@ def create_model(args):
     
     return model
 
+def get_test_set_indices(test_indices_str, dataset):
+    """
+    根据测试集索引字符串获取要评估的样本索引
+    
+    参数:
+        test_indices_str: 逗号分隔的索引字符串，例如："1,2,3,4,5"
+        dataset: 数据集对象
+    
+    返回:
+        list: 要评估的样本索引列表
+    """
+    if not test_indices_str:
+        return []
+    
+    try:
+        # 解析索引字符串
+        indices = [int(idx.strip()) for idx in test_indices_str.split(',')]
+        # 验证索引是否有效
+        valid_indices = [idx for idx in indices if 0 <= idx < len(dataset)]
+        if len(valid_indices) != len(indices):
+            print(f"警告：部分索引超出范围，已跳过无效索引")
+            print(f"可用索引范围：0 到 {len(dataset)-1}")
+            print(f"无效的索引：{[idx for idx in indices if idx < 0 or idx >= len(dataset)]}")
+        return valid_indices
+    except ValueError as e:
+        print(f"错误：无效的索引格式 - {e}")
+        print(f"可用索引范围：0 到 {len(dataset)-1}")
+        return []
+
 def main():
     args = parse_args()
     
@@ -455,22 +493,34 @@ def main():
     model = model.to(device)
     model.eval()
     
-    # 处理样本规格参数
-    sample_specs = None
-    if args.sample_specs is not None:
-        sample_specs = [spec.strip() for spec in args.sample_specs.split(';')]
-    
     # 加载数据集
     dataset = MultiTaskDataset(args.data_path)
     
-    # 获取要评估的实际索引
-    indices_to_evaluate = get_dataset_indices(sample_specs, dataset)
+    # 根据测试模式选择要评估的样本
+    indices_to_evaluate = []
+    if args.test_mode == 'generalization':
+        # 泛化测试模式
+        if args.sample_specs is not None:
+            sample_specs = [spec.strip() for spec in args.sample_specs.split(';')]
+            indices_to_evaluate = get_dataset_indices(sample_specs, dataset)
+            print(f"使用泛化测试模式，样本规格：{args.sample_specs}")
+        else:
+            print("错误：泛化测试模式需要提供 sample_specs 参数")
+            return
+    else:
+        # 测试集模式
+        if args.test_indices is not None:
+            indices_to_evaluate = get_test_set_indices(args.test_indices, dataset)
+            print(f"使用测试集模式，测试索引：{args.test_indices}")
+        else:
+            print("错误：测试集模式需要提供 test_indices 参数")
+            return
     
     if not indices_to_evaluate:
-        print("没有找到匹配的样本！")
+        print("没有找到要评估的样本！")
         return
     
-    print(f"找到 {len(indices_to_evaluate)} 个匹配的样本")
+    print(f"找到 {len(indices_to_evaluate)} 个要评估的样本")
     
     # 进行推理
     infer_model(model, args.data_path, args.save_dir, args.num_samples, indices_to_evaluate)
