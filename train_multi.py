@@ -18,7 +18,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
-from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
+from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset, generate_train_valid_test_dataset
 import logging
 import pandas as pd
 import time
@@ -50,6 +50,10 @@ def parse_args():
                       help='weight for GDM (super-resolution) task')
     parser.add_argument('--gsl_weight', type=float, default=0.5,
                       help='weight for GSL (source localization) task')
+    
+    # 数据集划分参数
+    parser.add_argument('--use_test_set', action='store_true',
+                      help='是否使用测试集划分（训练集80%，验证集10%，测试集10%）')
     
     args = parser.parse_args()
     return args
@@ -414,8 +418,14 @@ def train(args):
     print(f"Using device: {device}")
 
     # 数据集加载和打印信息
-    train_set, valid_set = generate_train_valid_dataset(
-        args.data_path, train_ratio=0.8, shuffle=True)
+    if args.use_test_set:
+        train_set, valid_set, test_set = generate_train_valid_test_dataset(
+            args.data_path, train_ratio=0.8, valid_ratio=0.1, shuffle=True)
+        print(f"使用测试集划分模式：训练集80%，验证集10%，测试集10%")
+    else:
+        train_set, valid_set = generate_train_valid_dataset(
+            args.data_path, train_ratio=0.8, shuffle=True)
+        print(f"使用传统划分模式：训练集80%，验证集20%")
 
     train_loader = DataLoader(
         train_set, batch_size=args.batch_size, shuffle=True,
