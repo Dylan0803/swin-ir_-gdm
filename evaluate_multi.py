@@ -6,7 +6,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
-from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset
+from datasets.h5_dataset import MultiTaskDataset
 import pandas as pd
 import h5py
 import argparse
