@@ -18,7 +18,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
-from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_dataset, generate_train_valid_test_dataset
+from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_test_dataset
 import logging
 import pandas as pd
 import time
@@ -423,8 +423,8 @@ def train(args):
             args.data_path, train_ratio=0.8, valid_ratio=0.1, shuffle=True)
         print(f"使用测试集划分模式：训练集80%，验证集10%，测试集10%")
     else:
-        train_set, valid_set = generate_train_valid_dataset(
-            args.data_path, train_ratio=0.8, shuffle=True)
+        train_set, valid_set, _ = generate_train_valid_test_dataset(
+            args.data_path, train_ratio=0.8, valid_ratio=0.2, shuffle=True)
         print(f"使用传统划分模式：训练集80%，验证集20%")
 
     train_loader = DataLoader(
@@ -458,14 +458,6 @@ def main():
     
     # 创建保存目录
     os.makedirs(args.save_dir, exist_ok=True)
-    
-    # 创建数据集和数据加载器
-    train_dataset, valid_dataset = generate_train_valid_dataset(args.data_path)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False)
-    
-    # 创建模型
-    model = create_model(args)
     
     # 训练模型
     train(args)
