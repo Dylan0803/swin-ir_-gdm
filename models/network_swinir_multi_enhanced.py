@@ -1,4 +1,4 @@
-#原模型使用的上采样器earest+conv，先修改成原SwinIR的上采样器为PixelShuffle子像素卷积
+#原模型使用的上采样器nearest+conv，先修改成原SwinIR的上采样器为PixelShuffle子像素卷积
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -178,34 +178,28 @@ class SwinIRMultiEnhanced(nn.Module):
             )
         
         # GDM分支 - 上采样重建
-        if self.upsampler == 'pixelshuffle':
-            self.conv_before_upsample = nn.Sequential(
-                nn.Conv2d(embed_dim, 64, 3, 1, 1),
-                nn.LeakyReLU(inplace=True)
-            )
+        if self.upsampler == 'nearest+conv':
             # 第一次上采样 (2x)
             self.conv_up1 = nn.Sequential(
-                nn.Conv2d(64, 64 * 4, 3, 1, 1),
-                nn.PixelShuffle(2),
+                nn.Conv2d(embed_dim, 64, 3, 1, 1),
                 nn.LeakyReLU(inplace=True)
             )
             # 第二次上采样 (1.5x)
             self.conv_up2 = nn.Sequential(
-                nn.Conv2d(64, 64 * 9, 3, 1, 1),
-                nn.PixelShuffle(3),
+                nn.Conv2d(64, 64, 3, 1, 1),
                 nn.LeakyReLU(inplace=True)
             )
             # 第三次上采样 (2x)
             self.conv_up3 = nn.Sequential(
-                nn.Conv2d(64, 64 * 4, 3, 1, 1),
-                nn.PixelShuffle(2),
+                nn.Conv2d(64, 64, 3, 1, 1),
                 nn.LeakyReLU(inplace=True)
             )
-            self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
+            # 最终输出层
             self.conv_last = nn.Conv2d(64, in_chans, 3, 1, 1)
-            self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+        else:
+            raise NotImplementedError(f'Upsampler [{self.upsampler}] is not supported')
         
-        # 增强的GSL分支
+        # GSL分支
         self.gsl_branch = EnhancedGSLBranch(embed_dim)
         
         self.apply(self._init_weights)
@@ -248,22 +242,34 @@ class SwinIRMultiEnhanced(nn.Module):
         # 浅层特征提取
         x = self.conv_first(x)
         
-        # 共享特征提取
-        shared_features = self.conv_after_body(self.forward_features(x)) + x
+        # 深层特征提取
+        res = self.forward_features(x)
+        res = self.conv_after_body(res)
+        res = res + x
         
-        # GDM分支 - 超分辨率重建
-        gdm_out = shared_features
-        gdm_out = self.conv_before_upsample(gdm_out)
-        gdm_out = self.conv_up1(gdm_out)
-        if self.upscale == 6:
-            gdm_out = self.conv_up2(gdm_out)
-            gdm_out = self.conv_up3(gdm_out)
-        gdm_out = self.conv_last(self.lrelu(self.conv_hr(gdm_out)))
+        # GDM分支 - 上采样重建
+        if self.upsampler == 'nearest+conv':
+            # 第一次上采样 (2x)
+            x = F.interpolate(res, scale_factor=2, mode='nearest')
+            x = self.conv_up1(x)
+            
+            # 第二次上采样 (1.5x)
+            x = F.interpolate(x, scale_factor=1.5, mode='nearest')
+            x = self.conv_up2(x)
+            
+            # 第三次上采样 (2x)
+            x = F.interpolate(x, scale_factor=2, mode='nearest')
+            x = self.conv_up3(x)
+            
+            # 最终输出
+            x = self.conv_last(x)
+        else:
+            raise NotImplementedError(f'Upsampler [{self.upsampler}] is not supported')
         
-        # 增强的GSL分支 - 泄漏源定位
-        gsl_out = self.gsl_branch(shared_features)
+        # GSL分支 - 泄漏源定位
+        gsl_out = self.gsl_branch(res)
         
-        # 裁剪GDM输出到正确大小
-        gdm_out = gdm_out[:, :, :H*self.upscale, :W*self.upscale]
+        # 裁剪到原始大小
+        x = x[:, :, :H*self.upscale, :W*self.upscale]
         
-        return gdm_out, gsl_out 
+        return x, gsl_out 

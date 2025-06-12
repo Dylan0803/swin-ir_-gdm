@@ -86,7 +86,7 @@ def create_model(args):
         'in_chans': 1,   # 输入通道数
         'upscale': 6,    # 上采样倍数
         'img_range': 1.,  # 图像范围
-        'upsampler': 'pixelshuffle'  # 上采样器类型
+        'upsampler': 'nearest+conv'  # 上采样器类型
     }
     
     # 原始模型参数
