@@ -19,14 +19,14 @@ class ConvBlock(nn.Module):
         
         # 使用深度可分离卷积来减少参数量
         self.conv1 = nn.Sequential(
-            nn.Conv2d(dim, dim, 3, 1, 1, groups=dim),
-            nn.Conv2d(dim, dim * expansion_ratio, 1),
+            nn.Conv2d(dim, dim, 3, 1, 1, groups=dim),  # 深度卷积
+            nn.Conv2d(dim, dim * expansion_ratio, 1),  # 逐点卷积
             nn.LeakyReLU(inplace=True)
         )
         
         self.conv2 = nn.Sequential(
-            nn.Conv2d(dim * expansion_ratio, dim * expansion_ratio, 3, 1, 1, groups=dim * expansion_ratio),
-            nn.Conv2d(dim * expansion_ratio, dim, 1),
+            nn.Conv2d(dim * expansion_ratio, dim * expansion_ratio, 3, 1, 1, groups=dim * expansion_ratio),  # 深度卷积
+            nn.Conv2d(dim * expansion_ratio, dim, 1),  # 逐点卷积
             nn.LeakyReLU(inplace=True)
         )
         
@@ -34,6 +34,9 @@ class ConvBlock(nn.Module):
         self.shortcut = nn.Sequential()
         
     def forward(self, x):
+        # 确保输入张量的通道数与模型维度匹配
+        if x.shape[1] != x.shape[1]:
+            x = x.permute(0, 3, 1, 2)  # 调整通道维度位置
         identity = x
         out = self.conv1(x)
         out = self.conv2(out)
@@ -188,7 +191,12 @@ class SwinIRHybrid(nn.Module):
             if isinstance(layer, RSTB):
                 x = layer(x, x_size)
             else:  # ConvBlock
+                # 确保输入张量的形状正确
+                if len(x.shape) == 3:  # [B, L, C]
+                    x = x.permute(0, 2, 1).view(x.shape[0], x.shape[2], x_size[0], x_size[1])
                 x = layer(x)
+                # 恢复形状
+                x = x.flatten(2).permute(0, 2, 1)
 
         x = self.norm(x)  # B L C
         x = self.patch_unembed(x, x_size)
