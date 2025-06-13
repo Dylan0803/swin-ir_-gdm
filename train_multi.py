@@ -18,6 +18,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
+from models.network_swinir_hybrid import SwinIRHybrid
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_test_dataset
 import logging
 import pandas as pd
@@ -30,8 +31,8 @@ def parse_args():
     
     # 模型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced'],
-                      help='选择模型类型: original, enhanced')
+                      choices=['original', 'enhanced', 'hybrid'],
+                      help='选择模型类型: original, enhanced, hybrid')
     
     # 数据参数
     parser.add_argument('--data_path', type=str, required=True,
@@ -119,10 +120,32 @@ def create_model(args):
         'resi_connection': '1conv'
     }
     
+    # 混合架构模型参数
+    hybrid_params = {
+        **base_params,
+        'window_size': 8,  # Swin Transformer窗口大小
+        'depths': [6, 6, 6, 6],  # Swin Transformer深度
+        'embed_dim': 60,  # 嵌入维度
+        'num_heads': [6, 6, 6, 6],  # 注意力头数
+        'mlp_ratio': 2.,  # MLP比率
+        'qkv_bias': True,
+        'qk_scale': None,
+        'drop_rate': 0.,
+        'attn_drop_rate': 0.,
+        'drop_path_rate': 0.1,
+        'norm_layer': nn.LayerNorm,
+        'ape': False,
+        'patch_norm': True,
+        'use_checkpoint': False,
+        'resi_connection': '1conv'
+    }
+    
     if args.model_type == 'original':
         model = SwinIRMulti(**original_params)
-    else:  # enhanced
+    elif args.model_type == 'enhanced':
         model = SwinIRMultiEnhanced(**enhanced_params)
+    else:  # hybrid
+        model = SwinIRHybrid(**hybrid_params)
     
     return model
 

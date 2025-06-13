@@ -6,6 +6,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
+from models.network_swinir_hybrid import SwinIRHybrid
 from datasets.h5_dataset import MultiTaskDataset
 import pandas as pd
 import h5py
@@ -15,6 +16,10 @@ import torch.nn.functional as F
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
 import random
+import sys
+# 添加项目根目录到Python路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 
 def evaluate_model(model, dataloader, device):
     """
@@ -353,8 +358,8 @@ def parse_args():
     
     # 添加模型类型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced'],
-                      help='选择模型类型: original, enhanced')
+                      choices=['original', 'enhanced', 'hybrid'],
+                      help='选择模型类型: original, enhanced, hybrid')
     
     # 添加缺失的参数
     parser.add_argument('--model_path', type=str, required=True,
@@ -423,10 +428,32 @@ def create_model(args):
         'resi_connection': '1conv'
     }
     
+    # 混合架构模型参数
+    hybrid_params = {
+        **base_params,
+        'window_size': 8,  # Swin Transformer窗口大小
+        'depths': [6, 6, 6, 6],  # Swin Transformer深度
+        'embed_dim': 60,  # 嵌入维度
+        'num_heads': [6, 6, 6, 6],  # 注意力头数
+        'mlp_ratio': 2.,  # MLP比率
+        'qkv_bias': True,
+        'qk_scale': None,
+        'drop_rate': 0.,
+        'attn_drop_rate': 0.,
+        'drop_path_rate': 0.1,
+        'norm_layer': nn.LayerNorm,
+        'ape': False,
+        'patch_norm': True,
+        'use_checkpoint': False,
+        'resi_connection': '1conv'
+    }
+    
     if args.model_type == 'original':
         model = SwinIRMulti(**original_params)
-    else:  # enhanced
+    elif args.model_type == 'enhanced':
         model = SwinIRMultiEnhanced(**enhanced_params)
+    else:  # hybrid
+        model = SwinIRHybrid(**hybrid_params)
     
     return model
 
