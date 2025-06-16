@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
 from models.network_swinir_hybrid import SwinIRHybrid
+from models.network_swinir_hybrid_fuse import SwinIRHybridFuse
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_test_dataset
 import logging
 import pandas as pd
@@ -31,8 +32,8 @@ def parse_args():
     
     # 模型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced', 'hybrid'],
-                      help='选择模型类型: original, enhanced, hybrid')
+                      choices=['original', 'enhanced', 'hybrid', 'hybrid_fuse'],
+                      help='选择模型类型: original, enhanced, hybrid, hybrid_fuse')
     
     # 数据参数
     parser.add_argument('--data_path', type=str, required=True,
@@ -144,8 +145,10 @@ def create_model(args):
         model = SwinIRMulti(**original_params)
     elif args.model_type == 'enhanced':
         model = SwinIRMultiEnhanced(**enhanced_params)
-    else:  # hybrid
+    elif args.model_type == 'hybrid':
         model = SwinIRHybrid(**hybrid_params)
+    else:  # hybrid_fuse
+        model = SwinIRHybridFuse(**hybrid_params)
     
     return model
 
