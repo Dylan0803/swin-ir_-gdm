@@ -4,49 +4,109 @@ import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
-# 导入原有的基础模块
+# [核心修改] 從的 swinir_multi.py 文件中導入所有需要的基礎模块
 from .network_swinir_multi_enhanced import (
-    Mlp, window_partition, window_reverse, WindowAttention,
-    SwinTransformerBlock, PatchMerging, BasicLayer, RSTB,
-    PatchEmbed, PatchUnEmbed, Upsample, UpsampleOneStep,
-    EnhancedGSLBranch
+    # Mlp,  # RSTB 内部使用，无需直接导入
+    # window_partition, # SwinTransformerBlock 内部使用
+    # window_reverse, # SwinTransformerBlock 内部使用
+    # WindowAttention, # SwinTransformerBlock 内部使用
+    # SwinTransformerBlock, # BasicLayer 内部使用
+    # BasicLayer, # RSTB 内部使用
+    RSTB,
+    PatchEmbed,
+    PatchUnEmbed,
 )
 
 class ConvBlock(nn.Module):
     """在RSTB之间插入的卷积模块，用于增强局部特征提取"""
     def __init__(self, dim, expansion_ratio=2):
         super(ConvBlock, self).__init__()
-        
-        # 使用深度可分离卷积来减少参数量
         self.conv1 = nn.Sequential(
-            nn.Conv2d(dim, dim, 3, 1, 1, groups=dim),  # 深度卷积
-            nn.Conv2d(dim, dim * expansion_ratio, 1),  # 逐点卷积
+            nn.Conv2d(dim, dim, 3, 1, 1, groups=dim),
+            nn.Conv2d(dim, dim * expansion_ratio, 1),
             nn.LeakyReLU(inplace=True)
         )
-        
         self.conv2 = nn.Sequential(
-            nn.Conv2d(dim * expansion_ratio, dim * expansion_ratio, 3, 1, 1, groups=dim * expansion_ratio),  # 深度卷积
-            nn.Conv2d(dim * expansion_ratio, dim, 1),  # 逐点卷积
+            nn.Conv2d(dim * expansion_ratio, dim * expansion_ratio, 3, 1, 1, groups=dim * expansion_ratio),
+            nn.Conv2d(dim * expansion_ratio, dim, 1),
             nn.LeakyReLU(inplace=True)
         )
-        
-        # 残差连接
         self.shortcut = nn.Sequential()
         
     def forward(self, x):
-        # 确保输入张量的通道数与模型维度匹配
-        # 这里原来的 if x.shape[1] != x.shape[1] 是一个恒等式，我修正为检查是否需要维度调整
-        # 通常情况下，ConvBlock 接收的 x 应该是 [B, C, H, W] 格式
-        # 如果从 Swin Transformer 出来的 x 是 [B, L, C] 格式，需要在 forward_features 中进行维度调整
-        # 这里假定 ConvBlock 接收的是 [B, C, H, W]
         identity = x
         out = self.conv1(x)
         out = self.conv2(out)
         out = out + identity
         return out
 
-class SwinIRHybrid(nn.Module):
-    """混合架构的SwinIR模型，在RSTB之间插入卷积模块"""
+
+class EnhancedGSLBranch(nn.Module):
+    """
+    [核心修改] 增强的GSL分支，现在可以同时输出坐标和空间注意力图
+    """
+    def __init__(self, embed_dim, hidden_dim=64):
+        super(EnhancedGSLBranch, self).__init__()
+        self.feature_extraction = nn.Sequential(
+            nn.Conv2d(embed_dim, hidden_dim, 3, 1, 1),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(hidden_dim, hidden_dim, 3, 1, 1),
+            nn.LeakyReLU(inplace=True)
+        )
+        self.spatial_attention = nn.Sequential(
+            nn.Conv2d(hidden_dim, 1, 7, 1, 3),
+            nn.Sigmoid()
+        )
+        self.channel_attention = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(hidden_dim, hidden_dim // 4, 1),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(hidden_dim // 4, hidden_dim, 1),
+            nn.Sigmoid()
+        )
+        self.fusion = nn.Sequential(
+            nn.Conv2d(hidden_dim, hidden_dim, 3, 1, 1),
+            nn.LeakyReLU(inplace=True)
+        )
+        self.position_predictor = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(hidden_dim // 2, 2)
+        )
+    
+    def forward(self, x):
+        features = self.feature_extraction(x)
+        spatial_att_map = self.spatial_attention(features)
+        features_attended = features * spatial_att_map
+        channel_att = self.channel_attention(features_attended)
+        features_fused = features_attended * channel_att
+        features_final = self.fusion(features_fused)
+        position = self.position_predictor(features_final)
+        return position, spatial_att_map
+
+class AttentionFusionModule(nn.Module):
+    """
+    [新增模块] 注意力融合模块
+    """
+    def __init__(self, dim):
+        super(AttentionFusionModule, self).__init__()
+        self.fusion_conv = nn.Sequential(
+            nn.Conv2d(dim, dim, 3, 1, 1),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(dim, dim, 3, 1, 1)
+        )
+
+    def forward(self, gdm_features, gsl_attention_map):
+        fused_features = gdm_features * gsl_attention_map
+        refined_features = self.fusion_conv(fused_features)
+        return refined_features + gdm_features
+
+class HybridFuse(nn.Module):
+    """
+    [核心修改] 新的模型，實現GSL指導GDM的互補學習
+    """
     def __init__(self, img_size=16, patch_size=1, in_chans=1,
                  embed_dim=60, depths=[6, 6, 6, 6], num_heads=[6, 6, 6, 6],
                  window_size=8, mlp_ratio=2., qkv_bias=True, qk_scale=None,
@@ -54,9 +114,9 @@ class SwinIRHybrid(nn.Module):
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
                  use_checkpoint=False, upscale=6, img_range=1., upsampler='nearest+conv', 
                  resi_connection='1conv'):
-        super(SwinIRHybrid, self).__init__()
+        super(HybridFuse, self).__init__()
         
-        # 基础参数设置
+        # --- 基础参数设置 ---
         self.img_size = img_size
         self.patch_size = patch_size
         self.in_chans = in_chans
@@ -66,68 +126,51 @@ class SwinIRHybrid(nn.Module):
         self.window_size = window_size
         self.img_range = img_range
         
-        # 浅层特征提取
+        # --- 浅层特征提取 ---
         self.conv_first = nn.Conv2d(in_chans, embed_dim, 3, 1, 1)
         
-        # 深层特征提取
+        # --- 深层特征提取骨干 ---
         self.num_layers = len(depths)
         self.ape = ape
         self.patch_norm = patch_norm
         self.num_features = embed_dim
         self.mlp_ratio = mlp_ratio
         
-        # Patch Embedding
         self.patch_embed = PatchEmbed(
             img_size=img_size, patch_size=patch_size, in_chans=embed_dim, 
             embed_dim=embed_dim, norm_layer=norm_layer if self.patch_norm else None)
         
-        # Patch UnEmbedding
         self.patch_unembed = PatchUnEmbed(
             img_size=img_size, patch_size=patch_size, in_chans=embed_dim, 
             embed_dim=embed_dim, norm_layer=norm_layer if self.patch_norm else None)
         
-        # 位置编码
         if self.ape:
             self.absolute_pos_embed = nn.Parameter(torch.zeros(1, self.patch_embed.num_patches, embed_dim))
             trunc_normal_(self.absolute_pos_embed, std=.02)
         
         self.pos_drop = nn.Dropout(p=drop_rate)
         
-        # 随机深度
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]
         
-        # 构建RSTB层和卷积模块
         self.layers = nn.ModuleList()
         for i_layer in range(self.num_layers):
-            # RSTB层
             layer = RSTB(
                 dim=embed_dim,
-                input_resolution=(self.patch_embed.patches_resolution[0],
-                                 self.patch_embed.patches_resolution[1]),
-                depth=depths[i_layer],
-                num_heads=num_heads[i_layer],
-                window_size=window_size,
-                mlp_ratio=self.mlp_ratio,
-                qkv_bias=qkv_bias, qk_scale=qk_scale,
+                input_resolution=(self.patch_embed.patches_resolution[0], self.patch_embed.patches_resolution[1]),
+                depth=depths[i_layer], num_heads=num_heads[i_layer], window_size=window_size,
+                mlp_ratio=self.mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate,
                 drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])],
-                norm_layer=norm_layer,
-                downsample=None,
-                use_checkpoint=use_checkpoint,
-                img_size=img_size,
-                patch_size=patch_size,
-                resi_connection=resi_connection
+                norm_layer=norm_layer, downsample=None, use_checkpoint=use_checkpoint,
+                img_size=img_size, patch_size=patch_size, resi_connection=resi_connection
             )
             self.layers.append(layer)
-            
-            # 在每个RSTB层后添加卷积模块
-            if i_layer < self.num_layers - 1:  # 除了最后一层
+            if i_layer < self.num_layers - 1:
                 conv_block = ConvBlock(embed_dim)
                 self.layers.append(conv_block)
         
         self.norm = norm_layer(self.num_features)
         
-        # 深层特征提取后的卷积层
         if resi_connection == '1conv':
             self.conv_after_body = nn.Conv2d(embed_dim, embed_dim, 3, 1, 1)
         elif resi_connection == '3conv':
@@ -138,33 +181,19 @@ class SwinIRHybrid(nn.Module):
                 nn.LeakyReLU(negative_slope=0.2, inplace=True),
                 nn.Conv2d(embed_dim // 4, embed_dim, 3, 1, 1)
             )
-        
-        # GDM分支 - 上采样重建
+
+        # --- GDM 和 GSL 分支的交互 ---
+        self.gsl_branch = EnhancedGSLBranch(embed_dim)
+        self.attention_fusion = AttentionFusionModule(embed_dim)
+
         if self.upsampler == 'nearest+conv':
-            # 第一次上采样 (2x)
-            self.conv_up1 = nn.Sequential(
-                nn.Conv2d(embed_dim, 64, 3, 1, 1),
-                nn.LeakyReLU(inplace=True)
-            )
-            # 第二次上采样 (1.5x)
-            self.conv_up2 = nn.Sequential(
-                nn.Conv2d(64, 64, 3, 1, 1),
-                nn.LeakyReLU(inplace=True)
-            )
-            # 第三次上采样 (2x)
-            self.conv_up3 = nn.Sequential(
-                nn.Conv2d(64, 64, 3, 1, 1),
-                nn.LeakyReLU(inplace=True)
-            )
-            # 最终输出层
+            self.gdm_entry = nn.Conv2d(embed_dim, embed_dim, 3, 1, 1)
+            self.conv_up1 = nn.Sequential(nn.Conv2d(embed_dim, 64, 3, 1, 1), nn.LeakyReLU(inplace=True))
+            self.conv_up2 = nn.Sequential(nn.Conv2d(64, 64, 3, 1, 1), nn.LeakyReLU(inplace=True))
+            self.conv_up3 = nn.Sequential(nn.Conv2d(64, 64, 3, 1, 1), nn.LeakyReLU(inplace=True))
             self.conv_last = nn.Conv2d(64, in_chans, 3, 1, 1)
         else:
             raise NotImplementedError(f'Upsampler [{self.upsampler}] is not supported')
-        
-        # GSL分支 - 泄漏源定位
-        # 假设 EnhancedGSLBranch 的 forward 方法现在会返回 (gsl_output, attention_map)
-        # 如果 EnhancedGSLBranch 还没有这个功能，你需要在其内部实现生成 attention_map
-        self.gsl_branch = EnhancedGSLBranch(embed_dim) 
         
         self.apply(self._init_weights)
 
@@ -194,71 +223,47 @@ class SwinIRHybrid(nn.Module):
         for layer in self.layers:
             if isinstance(layer, RSTB):
                 x = layer(x, x_size)
-            else:  # ConvBlock
-                # 确保输入张量的形状正确，这里是从 [B, L, C] 转换为 [B, C, H, W]
-                # 然后再转换回 [B, L, C]
-                H, W = x_size
-                x = x.permute(0, 2, 1).view(x.shape[0], x.shape[2], H, W) # [B, C, H, W]
-                x = layer(x) # ConvBlock 处理
-                x = x.flatten(2).permute(0, 2, 1) # [B, L, C]
-        
-        x = self.norm(x)  # B L C
-        x = self.patch_unembed(x, x_size) # B C H W
+            else:
+                B, L, C = x.shape
+                H_feat, W_feat = x_size
+                x_conv = x.permute(0, 2, 1).contiguous().view(B, C, H_feat, W_feat)
+                x_conv = layer(x_conv)
+                x = x_conv.flatten(2).permute(0, 2, 1).contiguous()
 
+        x = self.norm(x)
+        x = self.patch_unembed(x, x_size)
         return x
 
     def forward(self, x):
-        H_orig, W_orig = x.shape[2:] # 记录原始输入图像的H和W
-        x = self.check_image_size(x)
+        H, W = x.shape[2:]
+        x_pad = self.check_image_size(x)
         
-        # 浅层特征提取
-        x_first_conv = self.conv_first(x)
+        x_first = self.conv_first(x_pad)
         
-        # 深层特征提取
-        shared_features = self.forward_features(x_first_conv) # 这里的 shared_features 是 [B, C, H', W']
+        shared_features = self.forward_features(x_first)
+        shared_features = self.conv_after_body(shared_features)
+        shared_features = shared_features + x_first
         
-        # 经过 conv_after_body，得到用于 GDM 和 GSL 的共享特征
-        res_gdm = self.conv_after_body(shared_features)
+        gsl_position, gsl_attention_map = self.gsl_branch(shared_features)
         
-        # GSL分支 - 泄漏源定位，并获取注意力图
-        # 假设 EnhancedGSLBranch 的 forward 方法返回 (定位输出, 注意力图)
-        # 注意力图应该是一个单通道的张量，例如 [B, 1, H', W']，且与 shared_features 具有相同的空间维度
-        gsl_out, attention_map = self.gsl_branch(shared_features) 
+        gdm_features = self.gdm_entry(shared_features)
+        gdm_features_guided = self.attention_fusion(gdm_features, gsl_attention_map)
         
-        # 将注意力图应用到 GDM 分支的特征图上
-        # 确保 attention_map 的空间维度与 res_gdm 匹配
-        # 如果 attention_map 是 [B, 1, H', W']，则可以直接逐元素相乘
-        # 如果 attention_map 是其他形状（如 [B, H', W']），可能需要 unsqueeze(1)
-        if attention_map.shape[1] == 1: # 如果注意力图是单通道
-             res_gdm_guided = res_gdm * attention_map
-        else: # 如果注意力图的通道数与特征图相同
-            res_gdm_guided = res_gdm * attention_map
-        
-        # 将引导后的特征与浅层特征相加（残差连接）
-        # 这里需要确保 res_gdm_guided 和 x_first_conv 的尺寸匹配
-        # shared_features (和 res_gdm) 的 H' W' 与 x_first_conv 的 H W 是一致的 (patch_embed 和 patch_unembed 保证)
-        res_gdm_final = res_gdm_guided + x_first_conv 
-        
-        # GDM分支 - 上采样重建
         if self.upsampler == 'nearest+conv':
-            # 第一次上采样 (2x)
-            x_gdm = F.interpolate(res_gdm_final, scale_factor=2, mode='nearest')
-            x_gdm = self.conv_up1(x_gdm)
+            up_feat = F.interpolate(gdm_features_guided, scale_factor=2, mode='nearest')
+            up_feat = self.conv_up1(up_feat)
             
-            # 第二次上采样 (1.5x)
-            x_gdm = F.interpolate(x_gdm, scale_factor=1.5, mode='nearest')
-            x_gdm = self.conv_up2(x_gdm)
+            up_feat = F.interpolate(up_feat, scale_factor=1.5, mode='nearest')
+            up_feat = self.conv_up2(up_feat)
             
-            # 第三次上采样 (2x)
-            x_gdm = F.interpolate(x_gdm, scale_factor=2, mode='nearest')
-            x_gdm = self.conv_up3(x_gdm)
+            up_feat = F.interpolate(up_feat, scale_factor=2, mode='nearest')
+            up_feat = self.conv_up3(up_feat)
             
-            # 最终输出
-            gdm_out = self.conv_last(x_gdm)
+            gdm_output = self.conv_last(up_feat)
         else:
-            raise NotImplementedError(f'Upsampler [{self.upsampler}] is not supported')
+            gdm_output = None 
+
+        if gdm_output is not None:
+            gdm_output = gdm_output[..., :H*self.upscale, :W*self.upscale]
         
-        # 裁剪到原始大小
-        gdm_out = gdm_out[:, :, :H_orig*self.upscale, :W_orig*self.upscale]
-        
-        return gdm_out, gsl_out # 返回 GDM 和 GSL 的输出
+        return gdm_output, gsl_position
