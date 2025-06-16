@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
 from models.network_swinir_hybrid import SwinIRHybrid
-from models.network_swinir_hybrid_fuse import SwinIRHybridFuse
+from models.network_swinir_hybrid_fuse import HybridFuse
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_test_dataset
 import logging
 import pandas as pd
