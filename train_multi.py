@@ -148,7 +148,7 @@ def create_model(args):
     elif args.model_type == 'hybrid':
         model = SwinIRHybrid(**hybrid_params)
     else:  # hybrid_fuse
-        model = SwinIRHybridFuse(**hybrid_params)
+        model = HybridFuse(**hybrid_params)
     
     return model
 
