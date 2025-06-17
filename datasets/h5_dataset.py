@@ -57,8 +57,7 @@ class MultiTaskDataset(Dataset):
                             'source_group': source_group_name,
                             'time_step': time_step
                         })
-                except Exception as e:
-                    print(f"警告：无法处理组 {wind_group_name}/{source_group_name}: {str(e)}")
+                except Exception:
                     continue
         
         # 如果未指定索引列表，就使用全部数据
