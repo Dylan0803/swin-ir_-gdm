@@ -115,7 +115,7 @@ class HybridFuse(nn.Module):
                  use_checkpoint=False, upscale=6, img_range=1., upsampler='nearest+conv', 
                  resi_connection='1conv'):
         super(HybridFuse, self).__init__()
-        
+
         # --- 基础参数设置 ---
         self.img_size = img_size
         self.patch_size = patch_size
@@ -194,7 +194,9 @@ class HybridFuse(nn.Module):
             self.conv_last = nn.Conv2d(64, in_chans, 3, 1, 1)
         else:
             raise NotImplementedError(f'Upsampler [{self.upsampler}] is not supported')
-        
+         #[修改]添加用于动态损失加权的可学习参数
+        self.log_var_gdm = nn.Parameter(torch.zeros(1))
+        self.log_var_gsl = nn.Parameter(torch.zeros(1))       
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
