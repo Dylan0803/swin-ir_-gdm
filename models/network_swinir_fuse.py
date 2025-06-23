@@ -17,33 +17,12 @@ from .network_swinir_multi_enhanced import (
     PatchUnEmbed,
 )
 
-class ConvBlock(nn.Module):
-    """在RSTB之间插入的卷积模块，用于增强局部特征提取"""
-    def __init__(self, dim, expansion_ratio=2):
-        super(ConvBlock, self).__init__()
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(dim, dim, 3, 1, 1, groups=dim),
-            nn.Conv2d(dim, dim * expansion_ratio, 1),
-            nn.LeakyReLU(inplace=True)
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(dim * expansion_ratio, dim * expansion_ratio, 3, 1, 1, groups=dim * expansion_ratio),
-            nn.Conv2d(dim * expansion_ratio, dim, 1),
-            nn.LeakyReLU(inplace=True)
-        )
-        self.shortcut = nn.Sequential()
-        
-    def forward(self, x):
-        identity = x
-        out = self.conv1(x)
-        out = self.conv2(out)
-        out = out + identity
-        return out
+# [核心修改] ConvBlock 类已被完全移除，因为它不再被使用。
 
 
 class EnhancedGSLBranch(nn.Module):
     """
-    [核心修改] 增强的GSL分支，现在可以同时输出坐标和空间注意力图
+    增强的GSL分支，可以同时输出坐标和空间注意力图（保持不变）。
     """
     def __init__(self, embed_dim, hidden_dim=64):
         super(EnhancedGSLBranch, self).__init__()
@@ -88,7 +67,7 @@ class EnhancedGSLBranch(nn.Module):
 
 class AttentionFusionModule(nn.Module):
     """
-    [新增模块] 注意力融合模块
+    注意力融合模块，负责指导GDM分支（保持不变）。
     """
     def __init__(self, dim):
         super(AttentionFusionModule, self).__init__()
@@ -103,9 +82,9 @@ class AttentionFusionModule(nn.Module):
         refined_features = self.fusion_conv(fused_features)
         return refined_features + gdm_features
 
-class HybridFuse(nn.Module):
+class SwinIRFuse(nn.Module): # [核心修改] 模型重命名
     """
-    [核心修改] 新的模型，實現GSL指導GDM的互補學習
+    纯Swin Transformer骨干网络，带有任务融合机制的模型。
     """
     def __init__(self, img_size=16, patch_size=1, in_chans=1,
                  embed_dim=60, depths=[6, 6, 6, 6], num_heads=[6, 6, 6, 6],
@@ -114,7 +93,7 @@ class HybridFuse(nn.Module):
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
                  use_checkpoint=False, upscale=6, img_range=1., upsampler='nearest+conv', 
                  resi_connection='1conv'):
-        super(HybridFuse, self).__init__()
+        super(SwinIRFuse, self).__init__()
 
         # --- 基础参数设置 ---
         self.img_size = img_size
@@ -152,6 +131,7 @@ class HybridFuse(nn.Module):
         
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]
         
+        # [核心修改] 构建骨干网络时，只添加RSTB，不再插入ConvBlock
         self.layers = nn.ModuleList()
         for i_layer in range(self.num_layers):
             layer = RSTB(
@@ -165,9 +145,6 @@ class HybridFuse(nn.Module):
                 img_size=img_size, patch_size=patch_size, resi_connection=resi_connection
             )
             self.layers.append(layer)
-            if i_layer < self.num_layers - 1:
-                conv_block = ConvBlock(embed_dim)
-                self.layers.append(conv_block)
         
         self.norm = norm_layer(self.num_features)
         
@@ -194,9 +171,11 @@ class HybridFuse(nn.Module):
             self.conv_last = nn.Conv2d(64, in_chans, 3, 1, 1)
         else:
             raise NotImplementedError(f'Upsampler [{self.upsampler}] is not supported')
-         #[修改]添加用于动态损失加权的可学习参数
+            
+        # 为动态损失加权准备的可学习参数
         self.log_var_gdm = nn.Parameter(torch.zeros(1))
-        self.log_var_gsl = nn.Parameter(torch.zeros(1))       
+        self.log_var_gsl = nn.Parameter(torch.zeros(1))
+        
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -222,15 +201,9 @@ class HybridFuse(nn.Module):
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
 
+        # [核心修改] 简化了特征提取循环
         for layer in self.layers:
-            if isinstance(layer, RSTB):
-                x = layer(x, x_size)
-            else:
-                B, L, C = x.shape
-                H_feat, W_feat = x_size
-                x_conv = x.permute(0, 2, 1).contiguous().view(B, C, H_feat, W_feat)
-                x_conv = layer(x_conv)
-                x = x_conv.flatten(2).permute(0, 2, 1).contiguous()
+            x = layer(x, x_size)
 
         x = self.norm(x)
         x = self.patch_unembed(x, x_size)
