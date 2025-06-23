@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
 from models.network_swinir_hybrid import SwinIRHybrid
-from models.network_swinir_hybrid_fuse import HybridFuse as HybridFuse
+from models.network_swinir_fuse import SwinIRFuse
 from datasets.h5_dataset import MultiTaskDataset
 import pandas as pd
 import h5py
@@ -359,8 +359,8 @@ def parse_args():
     
     # 添加模型类型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced', 'hybrid', 'hybrid_fuse'],
-                      help='选择模型类型: original, enhanced, hybrid, hybrid_fuse')
+                      choices=['original', 'enhanced', 'hybrid', 'fuse'],
+                      help='选择模型类型: original, enhanced, hybrid, fuse')
     
     # 添加缺失的参数
     parser.add_argument('--model_path', type=str, required=True,
@@ -449,6 +449,25 @@ def create_model(args):
         'resi_connection': '1conv'
     }
     
+    # Fuse模型参数 (移除了resi_connection)
+    fuse_params = {
+        **base_params,
+        'window_size': 8,
+        'depths': [6, 6, 6, 6],
+        'embed_dim': 60,
+        'num_heads': [6, 6, 6, 6],
+        'mlp_ratio': 2.,
+        'qkv_bias': True,
+        'qk_scale': None,
+        'drop_rate': 0.,
+        'attn_drop_rate': 0.,
+        'drop_path_rate': 0.1,
+        'norm_layer': nn.LayerNorm,
+        'ape': False,
+        'patch_norm': True,
+        'use_checkpoint': False,
+    }
+    
     if args.model_type == 'original':
         model = SwinIRMulti(**original_params)
     elif args.model_type == 'enhanced':
@@ -456,7 +475,7 @@ def create_model(args):
     elif args.model_type == 'hybrid':
         model = SwinIRHybrid(**hybrid_params)
     else:  # hybrid_fuse
-        model = HybridFuse(**hybrid_params)
+        model = SwinIRFuse(**fuse_params)
     
     return model
 
