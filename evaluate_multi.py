@@ -474,7 +474,7 @@ def create_model(args):
         model = SwinIRMultiEnhanced(**enhanced_params)
     elif args.model_type == 'hybrid':
         model = SwinIRHybrid(**hybrid_params)
-    else:  # hybrid_fuse
+    else:  # fuse
         model = SwinIRFuse(**fuse_params)
     
     return model
@@ -543,14 +543,14 @@ def main():
     model.eval()
     
     # 加载数据集
-    dataset = MultiTaskDataset(args.data_path)
-    
+    dataset = None
     # 根据测试模式选择要评估的样本
     indices_to_evaluate = []
     if args.test_mode == 'generalization':
         # 泛化测试模式
         if args.sample_specs is not None:
             sample_specs = [spec.strip() for spec in args.sample_specs.split(';')]
+            dataset = MultiTaskDataset(args.data_path)
             indices_to_evaluate = get_dataset_indices(sample_specs, dataset)
             print(f"使用泛化测试模式，样本规格：{args.sample_specs}")
         else:
@@ -558,6 +558,9 @@ def main():
             return
     else:
         # 测试集模式
+        from datasets.h5_dataset import generate_train_valid_test_dataset
+        train_dataset, valid_dataset, test_dataset = generate_train_valid_test_dataset(args.data_path, seed=42)
+        dataset = test_dataset
         if args.test_indices is not None:
             indices_to_evaluate = get_test_set_indices(args.test_indices, dataset)
             print(f"使用测试集模式，测试索引：{args.test_indices}")
@@ -568,9 +571,7 @@ def main():
     if not indices_to_evaluate:
         print("没有找到要评估的样本！")
         return
-    
     print(f"找到 {len(indices_to_evaluate)} 个要评估的样本")
-    
     # 进行推理
     infer_model(model, args.data_path, args.save_dir, args.num_samples, indices_to_evaluate)
 
