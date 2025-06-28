@@ -22,7 +22,7 @@ from .network_swinir_multi_enhanced import (
 
 class EnhancedGSLBranch(nn.Module):
     """
-    增强的GSL分支，可以同时输出坐标和空间注意力图（保持不变）。
+    增强的GSL分支，可以同时输出坐标和空间注意力图。
     """
     def __init__(self, embed_dim, hidden_dim=64):
         super(EnhancedGSLBranch, self).__init__()
@@ -85,6 +85,31 @@ class AttentionFusionModule(nn.Module):
 class SwinIRFuse(nn.Module): # [核心修改] 模型重命名
     """
     纯Swin Transformer骨干网络，带有任务融合机制的模型。
+    """
+    """ SwinIR
+        基于 Swin Transformer 的图像恢复网络.
+    输入:
+        img_size (int | tuple(int)): 输入图像的大小，默认为 64*64.
+        patch_size (int | tuple(int)): patch 的大小，默认为 1.
+        in_chans (int): 输入图像的通道数，默认为 3.
+        embed_dim (int): Patch embedding 的维度，默认为 96.
+        depths (tuple(int)): Swin Transformer 层的深度.
+        num_heads (tuple(int)): 在不同层注意力头的个数.
+        window_size (int): 窗口大小，默认为 7.
+        mlp_ratio (float): MLP隐藏层特征图通道与嵌入层特征图通道的比，默认为 4.
+        qkv_bias (bool): 给 query, key, value 添加可学习的偏置，默认为 True.
+        qk_scale (float): 重写默认的缩放因子，默认为 None.
+        drop_rate (float): 随机丢弃神经元，丢弃率默认为 0.
+        attn_drop_rate (float): 注意力权重的丢弃率，默认为 0.
+        drop_path_rate (float): 深度随机丢弃率，默认为 0.1.
+        norm_layer (nn.Module): 归一化操作，默认为 nn.LayerNorm.
+        ape (bool): patch embedding 添加绝对位置 embedding，默认为 False.
+        patch_norm (bool): 在 patch embedding 后添加归一化操作，默认为 True.
+        use_checkpoint (bool): 是否使用 checkpointing 来节省显存，默认为 False.
+        upscale: 放大因子， 2/3/4/8 适合图像超分, 1 适合图像去噪和 JPEG 压缩去伪影
+        img_range: 灰度值范围， 1 或者 255.
+        upsampler: 图像重建方法的选择模块，可选择 pixelshuffle, pixelshuffledirect, nearest+conv 或 None.
+        resi_connection: 残差连接之前的卷积块， 可选择 1conv 或 3conv.
     """
     def __init__(self, img_size=16, patch_size=1, in_chans=1,
                  embed_dim=60, depths=[6, 6, 6, 6], num_heads=[6, 6, 6, 6],
