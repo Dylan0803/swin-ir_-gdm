@@ -17,53 +17,83 @@ from .network_swinir_multi_enhanced import (
     PatchUnEmbed,
 )
 
-# [核心修改] ConvBlock 类已被完全移除，因为它不再被使用。
 
+# === CBAM实现 ===
+class ChannelAttention(nn.Module):
+    def __init__(self, in_planes, ratio=16):
+        super(ChannelAttention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Conv2d(in_planes, in_planes // ratio, 1, bias=False),
+            nn.ReLU(),
+            nn.Conv2d(in_planes // ratio, in_planes, 1, bias=False)
+        )
+        self.sigmoid = nn.Sigmoid()
 
+    def forward(self, x):
+        avg_out = self.fc(self.avg_pool(x))
+        max_out = self.fc(self.max_pool(x))
+        out = avg_out + max_out
+        return self.sigmoid(out)
+
+class SpatialAttention(nn.Module):
+    def __init__(self, kernel_size=7):
+        super(SpatialAttention, self).__init__()
+        self.conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size // 2, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        x = torch.cat([avg_out, max_out], dim=1)
+        x = self.conv(x)
+        return self.sigmoid(x)
+
+class CBAM(nn.Module):
+    def __init__(self, channels, reduction=16, spatial_kernel=7):
+        super(CBAM, self).__init__()
+        self.channel_attention = ChannelAttention(channels, reduction)
+        self.spatial_attention = SpatialAttention(spatial_kernel)
+
+    def forward(self, x):
+        out = x * self.channel_attention(x)
+        att_map = self.spatial_attention(out)
+        out = out * att_map
+        return out, att_map
+
+# === 新GSL分支 ===
 class EnhancedGSLBranch(nn.Module):
     """
-    增强的GSL分支，可以同时输出坐标和空间注意力图。
+    GSL分支：编码+CBAM注意力+MLP输出坐标
     """
-    def __init__(self, embed_dim, hidden_dim=64):
-        super(EnhancedGSLBranch, self).__init__()
-        self.feature_extraction = nn.Sequential(
-            nn.Conv2d(embed_dim, hidden_dim, 3, 1, 1),
-            nn.LeakyReLU(inplace=True),
-            nn.Conv2d(hidden_dim, hidden_dim, 3, 1, 1),
-            nn.LeakyReLU(inplace=True)
+    def __init__(self, embed_dim, mid_chans=None):
+        super().__init__()
+        mid_chans = embed_dim if mid_chans is None else mid_chans
+
+        self.encoder = nn.Sequential(
+            nn.Conv2d(embed_dim, mid_chans, 3, 1, 1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_chans, mid_chans, 3, 1, 1),
+            nn.ReLU(inplace=True)
         )
-        self.spatial_attention = nn.Sequential(
-            nn.Conv2d(hidden_dim, 1, 7, 1, 3),
-            nn.Sigmoid()
-        )
-        self.channel_attention = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(hidden_dim, hidden_dim // 4, 1),
-            nn.LeakyReLU(inplace=True),
-            nn.Conv2d(hidden_dim // 4, hidden_dim, 1),
-            nn.Sigmoid()
-        )
-        self.fusion = nn.Sequential(
-            nn.Conv2d(hidden_dim, hidden_dim, 3, 1, 1),
-            nn.LeakyReLU(inplace=True)
-        )
-        self.position_predictor = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
+
+        self.attention = CBAM(mid_chans)
+
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        self.mlp = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(hidden_dim // 2, 2)
+            nn.Linear(mid_chans, mid_chans // 2),
+            nn.ReLU(inplace=True),
+            nn.Linear(mid_chans // 2, 2)
         )
-    
+
     def forward(self, x):
-        features = self.feature_extraction(x)
-        spatial_att_map = self.spatial_attention(features)
-        features_attended = features * spatial_att_map
-        channel_att = self.channel_attention(features_attended)
-        features_fused = features_attended * channel_att
-        features_final = self.fusion(features_fused)
-        position = self.position_predictor(features_final)
-        return position, spatial_att_map
+        feat = self.encoder(x)
+        att_feat, gsl_attention_map = self.attention(feat)
+        pooled = self.global_pool(att_feat)
+        coords = self.mlp(pooled)
+        return coords, gsl_attention_map
 
 class AttentionFusionModule(nn.Module):
     """
