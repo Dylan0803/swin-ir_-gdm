@@ -140,85 +140,96 @@ class MultiTaskDataset(Dataset):
 
 def generate_train_valid_test_dataset(data_file, train_ratio=0.8, valid_ratio=0.1, shuffle=True, seed=42):
     """
-    生成训练集、验证集和测试集
-    
-    参数：
-    data_file: .h5 数据文件路径
-    train_ratio: 训练集比例，默认 0.8
-    valid_ratio: 验证集比例，默认 0.1（测试集比例将自动为 1 - train_ratio - valid_ratio）
-    shuffle: 是否打乱数据
-    seed: 随机种子，默认42
-    
-    返回：
-    train_dataset: 训练集对象
-    valid_dataset: 验证集对象
-    test_dataset: 测试集对象
+    生成训练集、验证集和测试集 (按泄漏模拟组划分，防止数据泄露)
     """
-    # 设置随机种子
     set_seed(seed)
     
+    # 1. 识别所有独立的模拟组
+    simulation_groups = []
     with h5py.File(data_file, 'r') as f:
-        # 计算总数据量
-        total_len = 0
         for wind_group_name in f.keys():
             wind_group = f[wind_group_name]
-            source_groups = [f's{i}' for i in range(1, 9)]
-            for source_group_name in source_groups:
-                try:
-                    source_group = wind_group[source_group_name]
-                    total_len += len([k for k in source_group.keys() if k.startswith('HR_')])
-                except Exception as e:
-                    print(f"警告：计算数据量时跳过组 {wind_group_name}/{source_group_name}: {str(e)}")
-                    continue
-        
-        index_list = list(range(total_len))
-        
-        if shuffle:
-            random.shuffle(index_list)
-        
-        # 计算划分点
-        train_split = int(train_ratio * total_len)
-        valid_split = int((train_ratio + valid_ratio) * total_len)
-        
-        # 划分数据集
-        train_list = index_list[:train_split]
-        valid_list = index_list[train_split:valid_split]
-        test_list = index_list[valid_split:]
+            source_groups_in_file = [f's{i}' for i in range(1, 9)]
+            for source_group_name in source_groups_in_file:
+                if source_group_name in wind_group:
+                    simulation_groups.append((wind_group_name, source_group_name))
+
+    # 2. 打乱模拟组
+    if shuffle:
+        random.shuffle(simulation_groups)
     
-    # 创建数据集实例
-    train_dataset = MultiTaskDataset(data_file, train_list, shuffle=False)
+    # 3. 按比例划分
+    num_groups = len(simulation_groups)
+    train_split_idx = int(train_ratio * num_groups)
+    valid_split_idx = int((train_ratio + valid_ratio) * num_groups)
+    train_groups = simulation_groups[:train_split_idx]
+    valid_groups = simulation_groups[train_split_idx:valid_split_idx]
+    test_groups = simulation_groups[valid_split_idx:]
+    print(f"总共有 {num_groups} 个独立的模拟组。")
+    print(f"划分: {len(train_groups)} 组用于训练, {len(valid_groups)} 组用于验证, {len(test_groups)} 组用于测试。")
+
+    # 4. 构建全局索引映射
+    all_data_indices = []
+    global_idx_map = {}
+    with h5py.File(data_file, 'r') as f:
+        current_global_idx = 0
+        for wind_group_name in f.keys():
+            wind_group = f[wind_group_name]
+            source_groups_in_file = [f's{i}' for i in range(1, 9)]
+            for source_group_name in source_groups_in_file:
+                if source_group_name in wind_group:
+                    source_group = wind_group[source_group_name]
+                    time_steps_count = len([k for k in source_group.keys() if k.startswith('HR_')])
+                    for time_step in range(1, time_steps_count + 1):
+                        all_data_indices.append({
+                            'wind_group': wind_group_name,
+                            'source_group': source_group_name,
+                            'time_step': time_step
+                        })
+                        key = (wind_group_name, source_group_name, time_step)
+                        global_idx_map[key] = current_global_idx
+                        current_global_idx += 1
+
+    # 5. 根据组划分生成索引列表
+    train_list, valid_list, test_list = [], [], []
+    with h5py.File(data_file, 'r') as f:
+        for group_set, index_list in [(train_groups, train_list), (valid_groups, valid_list), (test_groups, test_list)]:
+            for wind_group_name, source_group_name in group_set:
+                source_group = f[wind_group_name][source_group_name]
+                time_steps_count = len([k for k in source_group.keys() if k.startswith('HR_')])
+                for time_step in range(1, time_steps_count + 1):
+                    key = (wind_group_name, source_group_name, time_step)
+                    index_list.append(global_idx_map[key])
+
+    # 6. 创建数据集实例
+    train_dataset = MultiTaskDataset(data_file, train_list, shuffle=True)
     valid_dataset = MultiTaskDataset(data_file, valid_list, shuffle=False)
     test_dataset = MultiTaskDataset(data_file, test_list, shuffle=False)
     
     return train_dataset, valid_dataset, test_dataset
 
-if __name__ == '__main__':
-    # 设置随机种子
-    set_seed(42)
-    
-    # 测试数据集加载
-    h5_path = 'C:\\Users\\yy143\\Desktop\\dataset\\source_dataset\\normalized_augmented_dataset.h5'
-    
-    # 创建数据集实例
-    train_dataset, valid_dataset, test_dataset = generate_train_valid_test_dataset(h5_path, seed=42)
-    print(f"训练集大小: {len(train_dataset)}")
-    print(f"验证集大小: {len(valid_dataset)}")
-    print(f"测试集大小: {len(test_dataset)}")
-    
-    # 获取一个样本
-    sample = train_dataset[0]
-    print("\n样本信息:")
-    print(f"LR数据形状: {sample['lr'].shape}")
-    print(f"HR数据形状: {sample['hr'].shape}")
-    print(f"泄漏源位置真值: {sample['source_pos']}")
-    print(f"HR最大浓度位置: {sample['hr_max_pos']}")
-    print(f"风场向量形状: {sample['wind_vector'].shape}")
-    
-    # 验证数据
-    print("\n数据验证:")
-    print(f"泄漏源位置真值类型: {sample['source_pos'].dtype}")
-    print(f"HR最大浓度位置类型: {sample['hr_max_pos'].dtype}")
-    print(f"风场向量类型: {sample['wind_vector'].dtype}")
-    print(f"LR数据范围: [{sample['lr'].min():.4f}, {sample['lr'].max():.4f}]")
-    print(f"HR数据范围: [{sample['hr'].min():.4f}, {sample['hr'].max():.4f}]")
-    print(f"风场向量范围: [{sample['wind_vector'].min():.4f}, {sample['wind_vector'].max():.4f}]")
+# ================== 泄漏检查测试模块 ==================
+if __name__ == "__main__":
+    # 假设你有 MultiTaskDataset 类和一个 h5 文件路径
+    data_file = "your_data.h5"
+    train_dataset, valid_dataset, test_dataset = generate_train_valid_test_dataset(data_file)
+
+    # 提取每个数据集用到的 simulation_groups
+    def get_sim_groups(dataset):
+        sim_groups = set()
+        for idx in dataset.indices:
+            info = dataset.all_data_indices[idx]
+            sim_groups.add((info['wind_group'], info['source_group']))
+        return sim_groups
+
+    train_groups = get_sim_groups(train_dataset)
+    test_groups = get_sim_groups(test_dataset)
+    valid_groups = get_sim_groups(valid_dataset)
+
+    print("训练集与测试集的组交集：", train_groups & test_groups)
+    print("训练集与验证集的组交集：", train_groups & valid_groups)
+    print("验证集与测试集的组交集：", valid_groups & test_groups)
+    if not (train_groups & test_groups):
+        print("✅ 训练集与测试集无泄漏！")
+    else:
+        print("❌ 训练集与测试集有泄漏！")
