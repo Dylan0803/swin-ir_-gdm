@@ -18,6 +18,7 @@ from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
 import random
 import sys
+import json
 # 添加项目根目录到Python路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -385,11 +386,31 @@ def parse_args():
     parser.add_argument('--test_indices', type=str, default=None,
                       help='测试集索引，用逗号分隔，例如：1,2,3,4,5')
     
+    # 添加 config 参数
+    parser.add_argument('--config', type=str, default=None, help='训练参数json路径（如training_args.json）')
+    
     args = parser.parse_args()
     return args
 
 def create_model(args):
     """根据参数创建模型"""
+    # 如果有 config 参数，优先读取
+    if args.config is not None and os.path.exists(args.config):
+        with open(args.config, 'r') as f:
+            config = json.load(f)
+        # 只保留模型相关参数
+        model_params = {k: v for k, v in config.items() if k not in ['model_path', 'data_path', 'save_dir', 'device', 'num_samples', 'test_mode', 'sample_specs', 'test_indices']}
+        # 选择模型类型
+        if args.model_type == 'original':
+            model = SwinIRMulti(**model_params)
+        elif args.model_type == 'enhanced':
+            model = SwinIRMultiEnhanced(**model_params)
+        elif args.model_type == 'hybrid':
+            model = SwinIRHybrid(**model_params)
+        else:
+            model = SwinIRFuse(**model_params)
+        return model
+
     # 基础模型参数
     base_params = {
         'img_size': 16,  # LR图像大小
