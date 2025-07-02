@@ -72,7 +72,8 @@ def create_model(args):
     """根据参数创建模型"""
     base_params = {
         'img_size': 16, 'in_chans': 1, 'upscale': 6, 'img_range': 1.,
-        'upsampler': 'nearest+conv', 'window_size': 8, 'mlp_ratio': 2.,
+        'upsampler': 'pixelshuffle',
+        'window_size': 8, 'mlp_ratio': 2.,
         'qkv_bias': True, 'qk_scale': None, 'drop_rate': 0., 'attn_drop_rate': 0.,
         'drop_path_rate': 0.1, 'norm_layer': nn.LayerNorm, 'ape': False,
         'patch_norm': True, 'use_checkpoint': False, 'resi_connection': '1conv'
