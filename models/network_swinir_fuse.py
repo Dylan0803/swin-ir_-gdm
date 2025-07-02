@@ -232,7 +232,6 @@ class SwinIRFuse(nn.Module): # [核心修改] 模型重命名
         elif self.upsampler == 'nearest+conv':
             self.conv_up1 = nn.Sequential(nn.Conv2d(embed_dim, 64, 3, 1, 1), nn.LeakyReLU(inplace=True))
             self.conv_up2 = nn.Sequential(nn.Conv2d(64, 64, 3, 1, 1), nn.LeakyReLU(inplace=True))
-            self.conv_up3 = nn.Sequential(nn.Conv2d(64, 64, 3, 1, 1), nn.LeakyReLU(inplace=True))
             self.conv_last = nn.Conv2d(64, in_chans, 3, 1, 1)
         else:
             raise NotImplementedError(f'Upsampler [{self.upsampler}] is not supported')
@@ -298,15 +297,12 @@ class SwinIRFuse(nn.Module): # [核心修改] 模型重命名
             up_feat = self.pixel_shuffle2(up_feat)
             gdm_output = self.conv_last(up_feat)
         elif self.upsampler == 'nearest+conv':
+            # 先2x上采样+卷积
             up_feat = F.interpolate(gdm_features_guided, scale_factor=2, mode='nearest')
             up_feat = self.conv_up1(up_feat)
-            
-            up_feat = F.interpolate(up_feat, scale_factor=1.5, mode='nearest')
+            # 再3x上采样+卷积
+            up_feat = F.interpolate(up_feat, scale_factor=3, mode='nearest')
             up_feat = self.conv_up2(up_feat)
-            
-            up_feat = F.interpolate(up_feat, scale_factor=2, mode='nearest')
-            up_feat = self.conv_up3(up_feat)
-            
             gdm_output = self.conv_last(up_feat)
         else:
             gdm_output = None 
