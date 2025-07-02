@@ -480,7 +480,11 @@ def create_model(args):
     
     # Fuse模型参数 (移除了resi_connection)
     fuse_params = {
-        **base_params,
+        'img_size': 16,
+        'in_chans': 1,
+        'upscale': 6,
+        'img_range': 1.,
+        'upsampler': 'nearest+conv',
         'window_size': 8,
         'depths': [6, 6, 6, 6],
         'embed_dim': 60,
@@ -550,23 +554,12 @@ def main():
     # 加载模型
     print(f"Loading model from {args.model_path}")
     try:
-        # 首先尝试使用 weights_only=True 加载
-        checkpoint = torch.load(args.model_path, map_location='cpu', weights_only=True)
+        # 直接加载 state_dict
+        state_dict = torch.load(args.model_path, map_location='cpu')
+        model.load_state_dict(state_dict)
     except Exception as e:
-        print(f"Warning: Failed to load with weights_only=True: {e}")
-        print("Attempting to load with weights_only=False...")
-        # 如果失败，则使用 weights_only=False 加载
-        checkpoint = torch.load(args.model_path, map_location='cpu', weights_only=False)
-    
-    print("Checkpoint keys:", checkpoint.keys())
-    
-    # 根据实际的键加载模型
-    if 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-    elif 'model' in checkpoint:
-        model.load_state_dict(checkpoint['model'])
-    else:
-        model.load_state_dict(checkpoint)
+        print(f"加载模型权重失败: {e}")
+        return
     
     model = model.to(device)
     model.eval()
