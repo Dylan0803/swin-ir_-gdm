@@ -218,6 +218,9 @@ class SwinIRFuse(nn.Module): # [核心修改] 模型重命名
         self.gsl_branch = EnhancedGSLBranch(embed_dim)
         self.attention_fusion = AttentionFusionModule(embed_dim)
 
+        # 这行提前到这里，所有上采样方式都定义
+        self.gdm_entry = nn.Conv2d(embed_dim, embed_dim, 3, 1, 1)
+
         if self.upsampler == 'pixelshuffle':
             # 2x 上采样
             self.conv_up1 = nn.Conv2d(embed_dim, embed_dim * 4, 3, 1, 1)
@@ -227,7 +230,6 @@ class SwinIRFuse(nn.Module): # [核心修改] 模型重命名
             self.pixel_shuffle2 = nn.PixelShuffle(3)
             self.conv_last = nn.Conv2d(embed_dim, in_chans, 3, 1, 1)
         elif self.upsampler == 'nearest+conv':
-            self.gdm_entry = nn.Conv2d(embed_dim, embed_dim, 3, 1, 1)
             self.conv_up1 = nn.Sequential(nn.Conv2d(embed_dim, 64, 3, 1, 1), nn.LeakyReLU(inplace=True))
             self.conv_up2 = nn.Sequential(nn.Conv2d(64, 64, 3, 1, 1), nn.LeakyReLU(inplace=True))
             self.conv_up3 = nn.Sequential(nn.Conv2d(64, 64, 3, 1, 1), nn.LeakyReLU(inplace=True))
