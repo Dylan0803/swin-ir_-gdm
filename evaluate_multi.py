@@ -394,12 +394,20 @@ def parse_args():
 
 def create_model(args):
     """根据参数创建模型"""
-    # 如果有 config 参数，优先读取
+    # 优先读取 config（training_args.json）
     if args.config is not None and os.path.exists(args.config):
         with open(args.config, 'r') as f:
             config = json.load(f)
         # 只保留模型相关参数
-        model_params = {k: v for k, v in config.items() if k not in ['model_path', 'data_path', 'save_dir', 'device', 'num_samples', 'test_mode', 'sample_specs', 'test_indices']}
+        ignore_keys = [
+            'model_type', 'model_path', 'data_path', 'save_dir', 'device', 'num_samples',
+            'test_mode', 'sample_specs', 'test_indices', 'seed', 'batch_size', 'num_epochs',
+            'lr', 'weight_decay', 'use_test_set'
+        ]
+        model_params = {k: v for k, v in config.items() if k not in ignore_keys}
+        print("【评估用模型参数如下，请校对】")
+        for k, v in model_params.items():
+            print(f"  {k}: {v}")
         # 选择模型类型
         if args.model_type == 'original':
             model = SwinIRMulti(**model_params)
