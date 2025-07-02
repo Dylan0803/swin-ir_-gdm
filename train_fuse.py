@@ -54,6 +54,11 @@ def parse_args():
     # 数据集划分参数
     parser.add_argument('--use_test_set', action='store_true', help='whether to use a test set split')
 
+    # === 新增：上采样相关参数 ===
+    parser.add_argument('--upsampler', type=str, default='pixelshuffle', choices=['nearest+conv', 'pixelshuffle'],
+                        help='上采样方式: nearest+conv 或 pixelshuffle')
+    parser.add_argument('--upscale', type=int, default=6, help='上采样倍数')
+
     args = parser.parse_args()
     return args
 
