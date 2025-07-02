@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument('--use_test_set', action='store_true', help='whether to use a test set split')
 
     # === 新增：上采样相关参数 ===
-    parser.add_argument('--upsampler', type=str, default='pixelshuffle', choices=['nearest+conv', 'pixelshuffle'],
+    parser.add_argument('--upsampler', type=str, default='nearest+conv', choices=['nearest+conv', 'pixelshuffle'],
                         help='上采样方式: nearest+conv 或 pixelshuffle')
     parser.add_argument('--upscale', type=int, default=6, help='上采样倍数')
 
@@ -77,7 +77,7 @@ def create_model(args):
     """根据参数创建模型"""
     base_params = {
         'img_size': 16, 'in_chans': 1, 'upscale': 6, 'img_range': 1.,
-        'upsampler': 'pixelshuffle',
+        'upsampler': 'nearest+conv',
         'window_size': 8, 'mlp_ratio': 2.,
         'qkv_bias': True, 'qk_scale': None, 'drop_rate': 0., 'attn_drop_rate': 0.,
         'drop_path_rate': 0.1, 'norm_layer': nn.LayerNorm, 'ape': False,
