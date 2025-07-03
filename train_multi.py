@@ -25,14 +25,15 @@ import pandas as pd
 import time
 import shutil
 import torch.nn.functional as F
+from models.network_swinir_multi_gdm import SwinIRMulti  # 新增
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train SwinIR Multi-task Model')
     
     # 模型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced', 'fuse'],
-                      help='选择模型类型: original, enhanced, fuse')
+                      choices=['original', 'enhanced', 'fuse', 'swinir_gdm'],
+                      help='选择模型类型: original, enhanced, fuse, swinir_gdm')
     
     # 数据参数
     parser.add_argument('--data_path', type=str, required=True,
@@ -140,12 +141,24 @@ def create_model(args):
         'resi_connection': '1conv'
     }
     
+    # 新增gdm模型参数（可根据network_swinir_multi_gdm.py实际需要调整）
+    gdm_params = {
+        **base_params,
+        'window_size': 8,
+        'depths': [6, 6, 6, 6],
+        'embed_dim': 60,
+        'num_heads': [6, 6, 6, 6],
+        'mlp_ratio': 2.,
+    }
+    
     if args.model_type == 'original':
         model = SwinIRMulti(**original_params)
     elif args.model_type == 'enhanced':
         model = SwinIRMultiEnhanced(**enhanced_params)
     elif args.model_type == 'fuse':
         model = SwinIRFuse(**fuse_params)
+    elif args.model_type == 'swinir_gdm':  # 新增分支
+        model = SwinIRMulti(**gdm_params)
     else:
         raise ValueError(f"未知的模型类型: {args.model_type}")
     
@@ -175,30 +188,33 @@ def plot_loss_lines(args, train_losses, valid_losses, train_gdm_losses, train_gs
     plt.legend()
     
     # GSL损失
-    plt.subplot(223)
-    plt.plot(train_gsl_losses, label='Train GSL Loss')
-    plt.plot(valid_gsl_losses, label='Valid GSL Loss')
-    plt.title('GSL Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
+    if args.model_type != 'swinir_gdm':
+        plt.subplot(223)
+        plt.plot(train_gsl_losses, label='Train GSL Loss')
+        plt.plot(valid_gsl_losses, label='Valid GSL Loss')
+        plt.title('GSL Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.legend()
     
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'training_metrics.png'))
     plt.close()
 
 def save_training_history(train_losses, valid_losses, train_gdm_losses, train_gsl_losses,
-                         valid_gdm_losses, valid_gsl_losses, save_dir):
+                         valid_gdm_losses, valid_gsl_losses, save_dir, model_type=None):
     """保存训练历史到CSV文件"""
-    history_df = pd.DataFrame({
+    history = {
         'epoch': range(1, len(train_losses) + 1),
         'train_total_loss': train_losses,
         'valid_total_loss': valid_losses,
         'train_gdm_loss': train_gdm_losses,
-        'train_gsl_loss': train_gsl_losses,
-        'valid_gdm_loss': valid_gdm_losses,
-        'valid_gsl_loss': valid_gsl_losses
-    })
+        'valid_gdm_loss': valid_gdm_losses
+    }
+    if model_type != 'swinir_gdm':
+        history['train_gsl_loss'] = train_gsl_losses
+        history['valid_gsl_loss'] = valid_gsl_losses
+    history_df = pd.DataFrame(history)
     history_df.to_csv(os.path.join(save_dir, 'training_history.csv'), index=False)
 
 def save_args(args, save_dir):
@@ -260,107 +276,95 @@ def train_model(model, train_loader, valid_loader, args):
         print(f"Resuming from epoch {start_epoch}")
     
     for epoch in range(start_epoch, args.num_epochs):
-        # 训练阶段
         model.train()
         train_loss = 0
         train_gdm_loss = 0
-        train_gsl_loss = 0
-        
-        # 创建训练进度条
+        train_gsl_loss = 0  # 只在多任务时用
+
         train_pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} [Train]',
                          leave=True, ncols=150)
-        
         for batch in train_pbar:
-            # 获取数据
             lr = batch['lr'].to(device)
             hr = batch['hr'].to(device)
-            source_pos = batch['source_pos'].to(device)
-            
-            # 前向传播
-            gdm_out, gsl_out = model(lr)
-            
-            # 计算损失
-            gdm_loss = gdm_criterion(gdm_out, hr)
-            gsl_loss = gsl_criterion(gsl_out, source_pos)
-            
-            # 总损失（加入权重）
-            loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
-            
-            # 反向传播和优化
+            if args.model_type == 'swinir_gdm':
+                gdm_out = model(lr)
+                gdm_loss = gdm_criterion(gdm_out, hr)
+                loss = gdm_loss
+                train_gdm_loss += gdm_loss.item()
+            else:
+                source_pos = batch['source_pos'].to(device)
+                gdm_out, gsl_out = model(lr)
+                gdm_loss = gdm_criterion(gdm_out, hr)
+                gsl_loss = gsl_criterion(gsl_out, source_pos)
+                loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
+                train_gdm_loss += gdm_loss.item()
+                train_gsl_loss += gsl_loss.item()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            
-            # 累计损失
             train_loss += loss.item()
-            train_gdm_loss += gdm_loss.item()
-            train_gsl_loss += gsl_loss.item()
-            
             # 更新进度条
-            train_pbar.set_postfix({
-                'loss': f'{loss.item():.4f}',
-                'gdm_loss': f'{gdm_loss.item():.4f}',
-                'gsl_loss': f'{gsl_loss.item():.4f}'
-            })
-        
-        # 计算平均训练损失
+            if args.model_type == 'swinir_gdm':
+                train_pbar.set_postfix({'loss': f'{loss.item():.4f}', 'gdm_loss': f'{gdm_loss.item():.4f}'})
+            else:
+                train_pbar.set_postfix({'loss': f'{loss.item():.4f}', 'gdm_loss': f'{gdm_loss.item():.4f}', 'gsl_loss': f'{gsl_loss.item():.4f}'})
         train_loss /= len(train_loader)
         train_gdm_loss /= len(train_loader)
-        train_gsl_loss /= len(train_loader)
-        
+        if args.model_type != 'swinir_gdm':
+            train_gsl_loss /= len(train_loader)
+
         # 验证阶段
         model.eval()
         valid_loss = 0
         valid_gdm_loss = 0
         valid_gsl_loss = 0
-        
-        # 创建验证进度条
         valid_pbar = tqdm(valid_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} [Valid]',
                          leave=True, ncols=150)
-        
         with torch.no_grad():
             for batch in valid_pbar:
                 lr = batch['lr'].to(device)
                 hr = batch['hr'].to(device)
-                source_pos = batch['source_pos'].to(device)
-                
-                gdm_out, gsl_out = model(lr)
-                
-                gdm_loss = gdm_criterion(gdm_out, hr)
-                gsl_loss = gsl_criterion(gsl_out, source_pos)
-                loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
-                
+                if args.model_type == 'swinir_gdm':
+                    gdm_out = model(lr)
+                    gdm_loss = gdm_criterion(gdm_out, hr)
+                    loss = gdm_loss
+                    valid_gdm_loss += gdm_loss.item()
+                else:
+                    source_pos = batch['source_pos'].to(device)
+                    gdm_out, gsl_out = model(lr)
+                    gdm_loss = gdm_criterion(gdm_out, hr)
+                    gsl_loss = gsl_criterion(gsl_out, source_pos)
+                    loss = args.gdm_weight * gdm_loss + args.gsl_weight * gsl_loss
+                    valid_gdm_loss += gdm_loss.item()
+                    valid_gsl_loss += gsl_loss.item()
                 valid_loss += loss.item()
-                valid_gdm_loss += gdm_loss.item()
-                valid_gsl_loss += gsl_loss.item()
-                
-                # 更新进度条
-                valid_pbar.set_postfix({
-                    'loss': f'{loss.item():.4f}',
-                    'gdm_loss': f'{gdm_loss.item():.4f}',
-                    'gsl_loss': f'{gsl_loss.item():.4f}'
-                })
-        
-        # 计算平均验证损失
+                if args.model_type == 'swinir_gdm':
+                    valid_pbar.set_postfix({'loss': f'{loss.item():.4f}', 'gdm_loss': f'{gdm_loss.item():.4f}'})
+                else:
+                    valid_pbar.set_postfix({'loss': f'{loss.item():.4f}', 'gdm_loss': f'{gdm_loss.item():.4f}', 'gsl_loss': f'{gsl_loss.item():.4f}'})
         valid_loss /= len(valid_loader)
         valid_gdm_loss /= len(valid_loader)
-        valid_gsl_loss /= len(valid_loader)
-        
-        # 更新学习率
+        if args.model_type != 'swinir_gdm':
+            valid_gsl_loss /= len(valid_loader)
+
         scheduler.step(valid_loss)
-        
-        # 记录损失
         train_losses.append(train_loss)
         valid_losses.append(valid_loss)
         train_gdm_losses.append(train_gdm_loss)
-        train_gsl_losses.append(train_gsl_loss)
         valid_gdm_losses.append(valid_gdm_loss)
-        valid_gsl_losses.append(valid_gsl_loss)
+        if args.model_type != 'swinir_gdm':
+            train_gsl_losses.append(train_gsl_loss)
+            valid_gsl_losses.append(valid_gsl_loss)
         
         # 打印训练信息
-        print(f'\nEpoch {epoch+1}/{args.num_epochs} Summary:')
-        print(f'Train Loss: {train_loss:.4f} (GDM: {train_gdm_loss:.4f}, GSL: {train_gsl_loss:.4f})')
-        print(f'Valid Loss: {valid_loss:.4f} (GDM: {valid_gdm_loss:.4f}, GSL: {valid_gsl_loss:.4f})')
+        if args.model_type == 'swinir_gdm':
+            print(f'\nEpoch {epoch+1}/{args.num_epochs} Summary:')
+            print(f'Train Loss: {train_loss:.4f} (GDM: {train_gdm_loss:.4f})')
+            print(f'Valid Loss: {valid_loss:.4f} (GDM: {valid_gdm_loss:.4f})')
+        else:
+            print(f'\nEpoch {epoch+1}/{args.num_epochs} Summary:')
+            print(f'Train Loss: {train_loss:.4f} (GDM: {train_gdm_loss:.4f}, GSL: {train_gsl_loss:.4f})')
+            print(f'Valid Loss: {valid_loss:.4f} (GDM: {valid_gdm_loss:.4f}, GSL: {valid_gsl_loss:.4f})')
         print(f'Current LR: {optimizer.param_groups[0]["lr"]:.6f}')
         print(f'Epoch {epoch+1} finished at {time.strftime("%Y-%m-%d %H:%M:%S")}')
         
@@ -410,7 +414,7 @@ def train_model(model, train_loader, valid_loader, args):
         save_training_history(train_losses, valid_losses,
                             train_gdm_losses, train_gsl_losses,
                             valid_gdm_losses, valid_gsl_losses,
-                            experiment_dir)
+                            experiment_dir, args.model_type)
     
     # 训练完成后，保存一份最佳模型的副本
     best_model_path = os.path.join(experiment_dir, f'best_model_{args.model_type}.pth')
