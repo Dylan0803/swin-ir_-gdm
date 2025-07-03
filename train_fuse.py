@@ -152,9 +152,9 @@ def train_model(model, train_loader, valid_loader, args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     
-    # 损失函数
-    gdm_criterion = nn.L1Loss()
-    gsl_criterion = nn.SmoothL1Loss()
+    # 损失函数 - 修改为GDM使用MSE，GSL使用MAE
+    gdm_criterion = nn.MSELoss()  # 改为MSE损失，适合图像超分辨率任务
+    gsl_criterion = nn.L1Loss()   # 改为L1损失(MAE)，适合位置预测任务
     
     # 优化器
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -207,7 +207,7 @@ def train_model(model, train_loader, valid_loader, args):
             epoch_train_losses['gdm'] += loss_gdm.item()
             epoch_train_losses['gsl'] += loss_gsl.item()
             
-            train_pbar.set_postfix({'loss': f'{loss.item():.4f}', 'gdm_L1': f'{loss_gdm.item():.4f}', 'gsl_sL1': f'{loss_gsl.item():.4f}'})
+            train_pbar.set_postfix({'loss': f'{loss.item():.4f}', 'gdm_MSE': f'{loss_gdm.item():.4f}', 'gsl_MAE': f'{loss_gsl.item():.4f}'})
         
         # 记录每轮的平均损失和权重参数
         train_history['total_loss'].append(epoch_train_losses['total'] / len(train_loader))
