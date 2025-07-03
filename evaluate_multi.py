@@ -19,6 +19,8 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 import random
 import sys
 import json
+import torch.serialization
+from argparse import Namespace
 # 添加项目根目录到Python路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -554,9 +556,27 @@ def main():
     # 加载模型
     print(f"Loading model from {args.model_path}")
     try:
-        # 直接加载 state_dict
-        state_dict = torch.load(args.model_path, map_location='cpu')
-        model.load_state_dict(state_dict)
+        # 针对 original/enhanced/hybrid 做更健壮的权重加载
+        if args.model_type in ['original', 'enhanced', 'hybrid']:
+            torch.serialization.add_safe_globals([Namespace])
+            checkpoint = torch.load(args.model_path, map_location='cpu', weights_only=False)
+            # 判断是完整checkpoint还是state_dict
+            if isinstance(checkpoint, dict):
+                if 'model' in checkpoint:
+                    state_dict = checkpoint['model']
+                elif 'state_dict' in checkpoint:
+                    state_dict = checkpoint['state_dict']
+                elif 'model_state_dict' in checkpoint:
+                    state_dict = checkpoint['model_state_dict']
+                else:
+                    state_dict = checkpoint
+            else:
+                state_dict = checkpoint
+            model.load_state_dict(state_dict)
+        else:
+            # fuse模型直接加载
+            state_dict = torch.load(args.model_path, map_location='cpu')
+            model.load_state_dict(state_dict)
     except Exception as e:
         print(f"加载模型权重失败: {e}")
         return
