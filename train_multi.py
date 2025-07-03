@@ -20,6 +20,7 @@ from models.network_swinir_multi import SwinIRMulti
 from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
 from models.network_swinir_hybrid import SwinIRHybrid
 from models.network_swinir_hybrid_fuse import HybridFuse
+from models.network_swinir_fuse import SwinIRFuse
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_test_dataset
 import logging
 import pandas as pd
@@ -32,8 +33,8 @@ def parse_args():
     
     # 模型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced', 'hybrid', 'hybrid_fuse'],
-                      help='选择模型类型: original, enhanced, hybrid, hybrid_fuse')
+                      choices=['original', 'enhanced', 'hybrid', 'hybrid_fuse', 'fuse'],
+                      help='选择模型类型: original, enhanced, hybrid, hybrid_fuse, fuse')
     
     # 数据参数
     parser.add_argument('--data_path', type=str, required=True,
@@ -147,8 +148,12 @@ def create_model(args):
         model = SwinIRMultiEnhanced(**enhanced_params)
     elif args.model_type == 'hybrid':
         model = SwinIRHybrid(**hybrid_params)
-    else:  # hybrid_fuse
+    elif args.model_type == 'hybrid_fuse':
         model = HybridFuse(**hybrid_params)
+    elif args.model_type == 'fuse':
+        model = SwinIRFuse(**hybrid_params)
+    else:
+        raise ValueError(f"未知的模型类型: {args.model_type}")
     
     return model
 
@@ -215,7 +220,7 @@ def train_model(model, train_loader, valid_loader, args):
     
     # 定义损失函数
     gdm_criterion = nn.MSELoss()  # 超分辨率重建损失
-    gsl_criterion = nn.MSELoss()  # 泄漏源定位损失
+    gsl_criterion = nn.L1Loss()  # 泄漏源定位损失
     
     # 定义优化器
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
