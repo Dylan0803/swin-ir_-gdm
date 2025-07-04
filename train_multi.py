@@ -25,7 +25,7 @@ import pandas as pd
 import time
 import shutil
 import torch.nn.functional as F
-from models.network_swinir_multi_gdm import SwinIRMulti  # 新增
+from models.network_swinir_multi_gdm import SwinIRMulti as SwinIRMultiGDM
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train SwinIR Multi-task Model')
@@ -157,8 +157,8 @@ def create_model(args):
         model = SwinIRMultiEnhanced(**enhanced_params)
     elif args.model_type == 'fuse':
         model = SwinIRFuse(**fuse_params)
-    elif args.model_type == 'swinir_gdm':  # 新增分支
-        model = SwinIRMulti(**gdm_params)
+    elif args.model_type == 'swinir_gdm':
+        model = SwinIRMultiGDM(**gdm_params)
     else:
         raise ValueError(f"未知的模型类型: {args.model_type}")
     
