@@ -24,6 +24,7 @@ from argparse import Namespace
 # 添加项目根目录到Python路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
+from models.network_swinir_multi_gdm import SwinIRMulti as SwinIRMultiGDM
 
 def evaluate_model(model, dataloader, device):
     """
@@ -144,67 +145,68 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     lr = lr.squeeze().cpu().numpy()
     hr = hr.squeeze().cpu().numpy()
     gdm_out = gdm_out.squeeze().cpu().numpy()
-    gsl_out = gsl_out.squeeze().cpu().numpy()
-    source_pos = source_pos.squeeze().cpu().numpy()
-    hr_max_pos = hr_max_pos.squeeze().cpu().numpy()
     
     # 计算差值图
     diff = hr - gdm_out
-    
+
     # 创建图像
     fig, axes = plt.subplots(2, 2, figsize=(12, 12))
     fig.suptitle('Gas Concentration Distribution', fontsize=16)
-    
+
     # 低分辨率输入
     im0 = axes[0, 0].imshow(lr, cmap='viridis')
     axes[0, 0].set_title('Low Resolution Input')
     axes[0, 0].axis('off')
     plt.colorbar(im0, ax=axes[0, 0])
-    
+
     # 高分辨率真实值
     im1 = axes[0, 1].imshow(hr, cmap='viridis')
     axes[0, 1].set_title('High Resolution Ground Truth')
     axes[0, 1].axis('off')
     plt.colorbar(im1, ax=axes[0, 1])
-    
+
     # 模型输出（超分辨率）
     im2 = axes[1, 0].imshow(gdm_out, cmap='viridis')
     axes[1, 0].set_title('Super Resolution Output')
     axes[1, 0].axis('off')
     plt.colorbar(im2, ax=axes[1, 0])
-    
-    # 在SR图像上标记泄漏源位置
-    # 反归一化坐标（乘以95.0）
-    true_pos = source_pos * 95.0
-    pred_pos = gsl_out * 95.0
-    
-    # 标记真实泄漏源位置（红色星形）
-    axes[1, 0].plot(true_pos[0], true_pos[1], 'r*', markersize=15, label='True Source')
-    
-    # 标记预测泄漏源位置（绿色星形）
-    axes[1, 0].plot(pred_pos[0], pred_pos[1], 'g*', markersize=15, label='Predicted Source')
-    
-    # 添加图例
-    axes[1, 0].legend(loc='upper right')
-    
+
+    # 只在非gdm模型时画泄漏源点
+    if (gsl_out is not None) and (source_pos is not None) and (hr_max_pos is not None):
+        gsl_out = gsl_out.squeeze().cpu().numpy()
+        source_pos = source_pos.squeeze().cpu().numpy()
+        hr_max_pos = hr_max_pos.squeeze().cpu().numpy()
+        # 反归一化坐标（乘以95.0）
+        true_pos = source_pos * 95.0
+        pred_pos = gsl_out * 95.0
+        # 标记真实泄漏源位置（红色星形）
+        axes[1, 0].plot(true_pos[0], true_pos[1], 'r*', markersize=15, label='True Source')
+        # 标记预测泄漏源位置（绿色星形）
+        axes[1, 0].plot(pred_pos[0], pred_pos[1], 'g*', markersize=15, label='Predicted Source')
+        # 添加图例
+        axes[1, 0].legend(loc='upper right')
+
     # 差值图
     im3 = axes[1, 1].imshow(diff, cmap='RdBu_r', vmin=-0.5, vmax=0.5)
     axes[1, 1].set_title('Difference (HR-SR)')
     axes[1, 1].axis('off')
     plt.colorbar(im3, ax=axes[1, 1])
-    
+
     # 调整布局
     plt.tight_layout()
-    
+
     # 保存图像
     plt.savefig(save_path)
     plt.close()
-    
-    # 计算反归一化后的距离并除以10
-    distance = np.sqrt(np.sum((pred_pos - true_pos) ** 2)) / 10.0
-    return distance
 
-def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None):
+    # 只在非gdm模型时返回距离
+    if (gsl_out is not None) and (source_pos is not None):
+        distance = np.sqrt(np.sum((pred_pos - true_pos) ** 2)) / 10.0
+        return distance
+    else:
+        return None
+
+def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, model_type='original'):
     """
     模型推理函数
     
@@ -251,11 +253,15 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None):
             # 将数据移到设备上
             lr = batch['lr'].unsqueeze(0).to(device)  # 添加batch维度
             hr = batch['hr'].unsqueeze(0).to(device)
-            source_pos = batch['source_pos'].unsqueeze(0).to(device)
+            source_pos = batch['source_pos'].unsqueeze(0).to(device) if 'source_pos' in batch else None
             
             # 模型推理
             with torch.no_grad():
-                gdm_out, gsl_out = model(lr)
+                if model_type == 'swinir_gdm':
+                    gdm_out = model(lr)
+                    gsl_out = None
+                else:
+                    gdm_out, gsl_out = model(lr)
             
             # 计算HR图像的最大值位置
             hr_max_pos = torch.tensor([torch.argmax(hr[0, 0]) % hr.shape[3], 
@@ -282,22 +288,26 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None):
             ssim = ((2 * mu1 * mu2 + c1) * (2 * sigma12 + c2)) / \
                    ((mu1 ** 2 + mu2 ** 2 + c1) * (sigma1 + sigma2 + c2))
             
-            # 反归一化坐标（乘以95.0）
-            true_pos = source_pos * 95.0
-            pred_pos = gsl_out * 95.0
-            
-            # 计算反归一化后的直线距离并除以10（转换为米）
-            position_error = torch.sqrt(torch.sum((pred_pos - true_pos) ** 2)) / 10.0
-            
             total_psnr += psnr.item()
-            total_position_error += position_error.item()
             total_mse += mse.item()
             total_ssim += ssim.item()
             valid_samples += 1
+
+            # 只在非gdm模型时计算GSL相关
+            if model_type != 'swinir_gdm':
+                # 反归一化坐标（乘以95.0）
+                true_pos = source_pos * 95.0
+                pred_pos = gsl_out * 95.0
+                # 计算反归一化后的直线距离并除以10（转换为米）
+                position_error = torch.sqrt(torch.sum((pred_pos - true_pos) ** 2)) / 10.0
+                total_position_error += position_error.item()
             
             # 保存结果
             save_path = os.path.join(save_dir, f'sample_{idx}.png')
-            visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path)
+            if model_type == 'swinir_gdm':
+                visualize_results(lr, hr, gdm_out, None, None, None, save_path)
+            else:
+                visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path)
             
         except KeyError as e:
             print(f"跳过无效数据: {e}")
@@ -309,16 +319,16 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None):
     # 计算平均指标
     if valid_samples > 0:
         avg_psnr = total_psnr / valid_samples
-        avg_position_error = total_position_error / valid_samples
         avg_mse = total_mse / valid_samples
         avg_ssim = total_ssim / valid_samples
-        
         print(f"\n评估结果:")
         print(f"有效样本数: {valid_samples}")
         print(f"Average PSNR: {avg_psnr:.2f} dB")
         print(f"Average MSE: {avg_mse:.6f}")
         print(f"Average SSIM: {avg_ssim:.4f}")
-        print(f"Average Position Error: {avg_position_error:.4f} m")
+        if model_type != 'swinir_gdm':
+            avg_position_error = total_position_error / valid_samples
+            print(f"Average Position Error: {avg_position_error:.4f} m")
     else:
         print("没有有效的样本可供评估")
 
@@ -362,8 +372,8 @@ def parse_args():
     
     # 添加模型类型选择参数
     parser.add_argument('--model_type', type=str, default='original',
-                      choices=['original', 'enhanced', 'hybrid', 'fuse'],
-                      help='选择模型类型: original, enhanced, hybrid, fuse')
+                      choices=['original', 'enhanced', 'hybrid', 'fuse', 'swinir_gdm'],
+                      help='选择模型类型: original, enhanced, hybrid, fuse, swinir_gdm')
     
     # 添加缺失的参数
     parser.add_argument('--model_path', type=str, required=True,
@@ -417,6 +427,8 @@ def create_model(args):
             model = SwinIRMultiEnhanced(**model_params)
         elif args.model_type == 'hybrid':
             model = SwinIRHybrid(**model_params)
+        elif args.model_type == 'swinir_gdm':
+            model = SwinIRMultiGDM(**model_params)  # 可根据需要单独设定参数
         else:
             model = SwinIRFuse(**model_params)
         return model
@@ -509,6 +521,8 @@ def create_model(args):
         model = SwinIRMultiEnhanced(**enhanced_params)
     elif args.model_type == 'hybrid':
         model = SwinIRHybrid(**hybrid_params)
+    elif args.model_type == 'swinir_gdm':
+        model = SwinIRMultiGDM(**original_params)  # 可根据需要单独设定参数
     else:  # fuse
         model = SwinIRFuse(**fuse_params)
     
@@ -575,7 +589,13 @@ def main():
             model.load_state_dict(state_dict)
         else:
             # fuse模型直接加载
-            state_dict = torch.load(args.model_path, map_location='cpu')
+            torch.serialization.add_safe_globals([Namespace])
+            checkpoint = torch.load(args.model_path, map_location='cpu', weights_only=False)
+            # 检查是否是完整checkpoint
+            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                state_dict = checkpoint['model_state_dict']
+            else:
+                state_dict = checkpoint
             model.load_state_dict(state_dict)
     except Exception as e:
         print(f"加载模型权重失败: {e}")
@@ -615,7 +635,7 @@ def main():
         return
     print(f"找到 {len(indices_to_evaluate)} 个要评估的样本")
     # 进行推理
-    infer_model(model, args.data_path, args.save_dir, args.num_samples, indices_to_evaluate)
+    infer_model(model, args.data_path, args.save_dir, args.num_samples, indices_to_evaluate, args.model_type)
 
 if __name__ == '__main__':
     main()
