@@ -230,11 +230,11 @@ def train_model(model, train_loader, valid_loader, args):
     
     # 定义损失函数
     gdm_criterion = nn.MSELoss()  # 超分辨率重建损失
-    gsl_criterion = nn.L1Loss()  # 泄漏源定位损失
+    gsl_criterion = nn.SmoothL1Loss()  # 泄漏源定位损失
     
     # 定义优化器
     #optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
     
     # 学习率调度器
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
