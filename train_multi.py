@@ -233,7 +233,8 @@ def train_model(model, train_loader, valid_loader, args):
     gsl_criterion = nn.L1Loss()  # 泄漏源定位损失
     
     # 定义优化器
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
+    #optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     
     # 学习率调度器
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
