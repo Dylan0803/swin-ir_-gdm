@@ -240,12 +240,10 @@ def train_model(model, train_loader, valid_loader, args):
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
     
     # 创建保存目录
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    experiment_dir = os.path.join(args.save_dir, f"{args.model_type}_{timestamp}")
-    os.makedirs(experiment_dir, exist_ok=True)
-    
+    os.makedirs(args.save_dir, exist_ok=True)
+
     # 保存训练参数
-    save_args(args, experiment_dir)
+    save_args(args, args.save_dir)
     
     # 初始化训练历史记录
     train_losses = []
@@ -260,7 +258,7 @@ def train_model(model, train_loader, valid_loader, args):
     start_epoch = 0
     
     # 检查是否有checkpoint可以恢复
-    checkpoint_path = os.path.join(experiment_dir, "latest_checkpoint.pth")
+    checkpoint_path = os.path.join(args.save_dir, "latest_checkpoint.pth")
     if os.path.exists(checkpoint_path):
         print(f"Loading checkpoint from {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path)
@@ -372,7 +370,7 @@ def train_model(model, train_loader, valid_loader, args):
         # 保存最佳模型
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
-            save_path = os.path.join(experiment_dir, f'best_model_{args.model_type}.pth')
+            save_path = os.path.join(args.save_dir, f'best_model_{args.model_type}.pth')
             torch.save({
                 'epoch': epoch + 1,
                 'model_state_dict': model.state_dict(),
@@ -397,11 +395,11 @@ def train_model(model, train_loader, valid_loader, args):
             'best_valid_loss': best_valid_loss,
             'args': args
         }
-        torch.save(checkpoint, os.path.join(experiment_dir, "latest_checkpoint.pth"))
+        torch.save(checkpoint, os.path.join(args.save_dir, "latest_checkpoint.pth"))
         
         # 每10个epoch保存一次历史checkpoint
         if (epoch + 1) % 10 == 0:
-            history_checkpoint_path = os.path.join(experiment_dir, f"checkpoint_epoch_{epoch+1}.pth")
+            history_checkpoint_path = os.path.join(args.save_dir, f"checkpoint_epoch_{epoch+1}.pth")
             torch.save(checkpoint, history_checkpoint_path)
             print(f"Checkpoint saved at epoch {epoch+1}")
         
@@ -409,23 +407,23 @@ def train_model(model, train_loader, valid_loader, args):
         plot_loss_lines(args, train_losses, valid_losses, 
                        train_gdm_losses, train_gsl_losses,
                        valid_gdm_losses, valid_gsl_losses, 
-                       experiment_dir)
+                       args.save_dir)
         
         # 保存训练历史
         save_training_history(train_losses, valid_losses,
                             train_gdm_losses, train_gsl_losses,
                             valid_gdm_losses, valid_gsl_losses,
-                            experiment_dir, args.model_type)
+                            args.save_dir, args.model_type)
     
     # 训练完成后，保存一份最佳模型的副本
-    best_model_path = os.path.join(experiment_dir, f'best_model_{args.model_type}.pth')
+    best_model_path = os.path.join(args.save_dir, f'best_model_{args.model_type}.pth')
     if os.path.exists(best_model_path):
         shutil.copy2(best_model_path, os.path.join(args.save_dir, f"{args.model_type}_best_model.pth"))
         print(f"最佳模型副本已保存至: {os.path.join(args.save_dir, f'{args.model_type}_best_model.pth')}")
     
     print("Training completed!")
     print(f"Best validation loss: {best_valid_loss:.4f}")
-    print(f"Model and checkpoints saved in {experiment_dir}")
+    print(f"Model and checkpoints saved in {args.save_dir}")
     
     return model, train_losses, valid_losses, best_valid_loss
 
