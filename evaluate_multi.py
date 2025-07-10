@@ -447,7 +447,7 @@ def create_model(args):
         **base_params,
         'window_size': 8,  # Swin Transformer窗口大小
         'depths': [6, 6, 6, 6],  # Swin Transformer深度
-        'embed_dim': 60,  # 嵌入维度
+        'embed_dim': 64,  # 嵌入维度
         'num_heads': [6, 6, 6, 6],  # 注意力头数
         'mlp_ratio': 2.,  # MLP比率,
     }
