@@ -35,6 +35,11 @@ def parse_args():
                       choices=['original', 'enhanced', 'fuse', 'swinir_gdm'],
                       help='选择模型类型: original, enhanced, fuse, swinir_gdm')
     
+    # 新增：上采样器选择参数
+    parser.add_argument('--upsampler', type=str, default='nearest+conv',
+                      choices=['nearest+conv', 'pixelshuffle'],
+                      help='选择上采样器类型: nearest+conv 或 pixelshuffle')
+    
     # 数据参数
     parser.add_argument('--data_path', type=str, required=True,
                       help='path to the dataset')
@@ -88,7 +93,7 @@ def create_model(args):
         'in_chans': 1,   # 输入通道数
         'upscale': 6,    # 上采样倍数
         'img_range': 1.,  # 图像范围
-        'upsampler': 'nearest+conv'  # 上采样器类型
+        'upsampler': args.upsampler  # 这里改为用命令行参数
     }
     
     # 原始模型参数
