@@ -401,6 +401,10 @@ def parse_args():
     # 添加 config 参数
     parser.add_argument('--config', type=str, default=None, help='训练参数json路径（如training_args.json）')
     
+    parser.add_argument('--upsampler', type=str, default='nearest+conv',
+                        choices=['nearest+conv', 'pixelshuffle'],
+                        help='上采样方式: nearest+conv（默认）或 pixelshuffle')
+    
     args = parser.parse_args()
     return args
 
@@ -414,7 +418,7 @@ def create_model(args):
         ignore_keys = [
             'model_type', 'model_path', 'data_path', 'save_dir', 'device', 'num_samples',
             'test_mode', 'sample_specs', 'test_indices', 'seed', 'batch_size', 'num_epochs',
-            'lr', 'weight_decay', 'use_test_set'
+            'lr', 'weight_decay', 'use_test_set', 'upsampler'
         ]
         model_params = {k: v for k, v in config.items() if k not in ignore_keys}
         print("【评估用模型参数如下，请校对】")
@@ -439,7 +443,7 @@ def create_model(args):
         'in_chans': 1,   # 输入通道数
         'upscale': 6,    # 上采样倍数
         'img_range': 1.,  # 图像范围
-        'upsampler': 'nearest+conv'  # 上采样器类型
+        'upsampler': args.upsampler  # 根据命令行参数设置
     }
     
     # 原始模型参数
@@ -498,7 +502,7 @@ def create_model(args):
         'in_chans': 1,
         'upscale': 6,
         'img_range': 1.,
-        'upsampler': 'nearest+conv',
+        'upsampler': args.upsampler,
         'window_size': 8,
         'depths': [6, 6, 6, 6],
         'embed_dim': 60,
