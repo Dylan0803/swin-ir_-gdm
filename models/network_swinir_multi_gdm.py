@@ -727,7 +727,29 @@ class SwinIRMulti(nn.Module):
             self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
             self.conv_last = nn.Conv2d(64, in_chans, 3, 1, 1)
             self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
-        
+        elif self.upsampler == 'pixelshuffle':
+            # PixelShuffle 方式，分步放大（2x再3x，最终6x）
+            self.conv_before_upsample = nn.Sequential(
+                nn.Conv2d(embed_dim, 64, 3, 1, 1),
+                nn.LeakyReLU(inplace=True)
+            )
+            # 第一步：2x放大
+            self.ps_up2 = nn.Sequential(
+                nn.Conv2d(64, 256, 3, 1, 1),  # 64*2*2=256
+                nn.PixelShuffle(2),
+                nn.LeakyReLU(inplace=True)
+            )
+            # 第二步：3x放大
+            self.ps_up3 = nn.Sequential(
+                nn.Conv2d(64, 576, 3, 1, 1),  # 64*3*3=576
+                nn.PixelShuffle(3),
+                nn.LeakyReLU(inplace=True)
+            )
+            self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
+            self.conv_last = nn.Conv2d(64, in_chans, 3, 1, 1)
+        else:
+            raise ValueError(f"Unknown upsampler: {self.upsampler}")
+
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -780,18 +802,29 @@ class SwinIRMulti(nn.Module):
         shared_features = self.conv_after_body(self.forward_features(x)) + x
         
         # GDM分支 - 超分辨率重建
-        gdm_out = shared_features
-        gdm_out = self.conv_before_upsample(gdm_out)
-        gdm_out = self.lrelu(self.conv_up1(torch.nn.functional.interpolate(gdm_out, scale_factor=2, mode='nearest')))
-        if self.upscale == 6:
-            gdm_out = self.lrelu(self.conv_up2(torch.nn.functional.interpolate(gdm_out, scale_factor=1.5, mode='nearest')))
-            gdm_out = self.lrelu(self.conv_up3(torch.nn.functional.interpolate(gdm_out, scale_factor=2, mode='nearest')))
-        gdm_out = self.conv_last(self.lrelu(self.conv_hr(gdm_out)))
-        
-        # 裁剪GDM输出到正确大小
-        gdm_out = gdm_out[:, :, :H*self.upscale, :W*self.upscale]
-        
-        return gdm_out
+        if self.upsampler == 'nearest+conv':
+            gdm_out = shared_features
+            gdm_out = self.conv_before_upsample(gdm_out)
+            gdm_out = self.lrelu(self.conv_up1(torch.nn.functional.interpolate(gdm_out, scale_factor=2, mode='nearest')))
+            if self.upscale == 6:
+                gdm_out = self.lrelu(self.conv_up2(torch.nn.functional.interpolate(gdm_out, scale_factor=1.5, mode='nearest')))
+                gdm_out = self.lrelu(self.conv_up3(torch.nn.functional.interpolate(gdm_out, scale_factor=2, mode='nearest')))
+            gdm_out = self.conv_last(self.lrelu(self.conv_hr(gdm_out)))
+            # 裁剪GDM输出到正确大小
+            gdm_out = gdm_out[:, :, :H*self.upscale, :W*self.upscale]
+            return gdm_out
+        elif self.upsampler == 'pixelshuffle':
+            # PixelShuffle 分步放大：2x再3x
+            gdm_out = shared_features
+            gdm_out = self.conv_before_upsample(gdm_out)
+            gdm_out = self.ps_up2(gdm_out)  # 2x
+            gdm_out = self.ps_up3(gdm_out)  # 3x
+            gdm_out = self.conv_last(self.conv_hr(gdm_out))
+            # 裁剪GDM输出到正确大小
+            gdm_out = gdm_out[:, :, :H*self.upscale, :W*self.upscale]
+            return gdm_out
+        else:
+            raise ValueError(f"Unknown upsampler: {self.upsampler}")
 
     def flops(self):
         flops = 0
