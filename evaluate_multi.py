@@ -561,6 +561,90 @@ def get_test_set_indices(test_indices_str, dataset):
         print(f"可用索引范围：0 到 {len(dataset)-1}")
         return []
 
+def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch_size=16, num_workers=4):
+    """
+    批量推理函数，仅用于all_generalization和all_test_set
+    """
+    import torch
+    from torch.utils.data import DataLoader
+    import os
+
+    os.makedirs(save_dir, exist_ok=True)
+    device = torch.device(device if torch.cuda.is_available() else 'cpu')
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+
+    model = model.to(device)
+    model.eval()
+
+    total_psnr = 0
+    total_position_error = 0
+    total_mse = 0
+    total_ssim = 0
+    valid_samples = 0
+
+    with torch.no_grad():
+        for i, batch in enumerate(tqdm(dataloader, desc="Batch Evaluating")):
+            lr = batch['lr'].to(device)
+            hr = batch['hr'].to(device)
+            source_pos = batch.get('source_pos', None)
+            if source_pos is not None:
+                source_pos = source_pos.to(device)
+
+            if model_type == 'swinir_gdm':
+                gdm_out = model(lr)
+                gsl_out = None
+            else:
+                gdm_out, gsl_out = model(lr)
+
+            # 计算指标（批量）
+            mse = F.mse_loss(gdm_out, hr, reduction='none')
+            mse = mse.view(mse.size(0), -1).mean(dim=1)
+            psnr = 10 * torch.log10(1.0 / mse)
+            c1 = (0.01 * 1.0) ** 2
+            c2 = (0.03 * 1.0) ** 2
+            mu1 = gdm_out.mean(dim=[1,2,3])
+            mu2 = hr.mean(dim=[1,2,3])
+            sigma1 = gdm_out.var(dim=[1,2,3])
+            sigma2 = hr.var(dim=[1,2,3])
+            sigma12 = ((gdm_out - mu1[:,None,None,None]) * (hr - mu2[:,None,None,None])).mean(dim=[1,2,3])
+            ssim = ((2 * mu1 * mu2 + c1) * (2 * sigma12 + c2)) / \
+                   ((mu1 ** 2 + mu2 ** 2 + c1) * (sigma1 + sigma2 + c2))
+
+            total_psnr += psnr.sum().item()
+            total_mse += mse.sum().item()
+            total_ssim += ssim.sum().item()
+            valid_samples += lr.size(0)
+
+            # GSL相关
+            if model_type != 'swinir_gdm' and source_pos is not None and gsl_out is not None:
+                true_pos = source_pos * 95.0
+                pred_pos = gsl_out * 95.0
+                position_error = torch.sqrt(torch.sum((pred_pos - true_pos) ** 2, dim=1)) / 10.0
+                total_position_error += position_error.sum().item()
+
+            # 可选：只保存前几个batch的可视化
+            # if i < 3:
+            #     for j in range(lr.size(0)):
+            #         save_path = os.path.join(save_dir, f'batch_{i}_sample_{j}.png')
+            #         visualize_results(lr[j:j+1], hr[j:j+1], gdm_out[j:j+1], gsl_out[j:j+1] if gsl_out is not None else None,
+            #                          source_pos[j:j+1] if source_pos is not None else None, None, save_path)
+
+    # 输出平均指标
+    if valid_samples > 0:
+        avg_psnr = total_psnr / valid_samples
+        avg_mse = total_mse / valid_samples
+        avg_ssim = total_ssim / valid_samples
+        print(f"\n批量评估结果:")
+        print(f"有效样本数: {valid_samples}")
+        print(f"Average PSNR: {avg_psnr:.2f} dB")
+        print(f"Average MSE: {avg_mse:.6f}")
+        print(f"Average SSIM: {avg_ssim:.4f}")
+        if model_type != 'swinir_gdm':
+            avg_position_error = total_position_error / valid_samples
+            print(f"Average Position Error: {avg_position_error:.4f} m")
+    else:
+        print("没有有效的样本可供评估")
+
 def main():
     args = parse_args()
     
@@ -626,12 +710,14 @@ def main():
         dataset = MultiTaskDataset(args.data_path)
         indices_to_evaluate = list(range(len(dataset)))
         print("使用泛化测试全量模式，评估所有样本")
+        use_batch = True
     elif args.test_mode == 'all_test_set':
         from datasets.h5_dataset import generate_train_valid_test_dataset
         train_dataset, valid_dataset, test_dataset = generate_train_valid_test_dataset(args.data_path, seed=42)
         dataset = test_dataset
         indices_to_evaluate = list(range(len(dataset)))
         print("使用测试集全量模式，评估所有样本")
+        use_batch = True
     else:
         # 测试集模式
         from datasets.h5_dataset import generate_train_valid_test_dataset
@@ -649,7 +735,10 @@ def main():
         return
     print(f"找到 {len(indices_to_evaluate)} 个要评估的样本")
     # 进行推理
-    infer_model(model, args.data_path, args.save_dir, args.num_samples, indices_to_evaluate, args.model_type)
+    if use_batch:
+        batch_infer_model(model, dataset, args.save_dir, args.model_type, device=args.device)
+    else:
+        infer_model(model, args.data_path, args.save_dir, args.num_samples, indices_to_evaluate, args.model_type)
 
 if __name__ == '__main__':
     main()
