@@ -387,10 +387,10 @@ def parse_args():
     parser.add_argument('--num_samples', type=int, default=5,
                       help='要评估的样本数量')
     
-    # 测试模式选择
+    # 测试模式选择，增加all_generalization和all_test_set
     parser.add_argument('--test_mode', type=str, default='generalization',
-                      choices=['generalization', 'test_set'],
-                      help='测试模式：generalization（泛化测试）或 test_set（测试集）')
+                      choices=['generalization', 'test_set', 'all_generalization', 'all_test_set'],
+                      help='测试模式：generalization（泛化测试）、test_set（测试集）、all_generalization（泛化全量）、all_test_set（测试集全量）')
     
     # 样本选择参数
     parser.add_argument('--sample_specs', type=str, default=None,
@@ -622,6 +622,16 @@ def main():
         else:
             print("错误：泛化测试模式需要提供 sample_specs 参数")
             return
+    elif args.test_mode == 'all_generalization':
+        dataset = MultiTaskDataset(args.data_path)
+        indices_to_evaluate = list(range(len(dataset)))
+        print("使用泛化测试全量模式，评估所有样本")
+    elif args.test_mode == 'all_test_set':
+        from datasets.h5_dataset import generate_train_valid_test_dataset
+        train_dataset, valid_dataset, test_dataset = generate_train_valid_test_dataset(args.data_path, seed=42)
+        dataset = test_dataset
+        indices_to_evaluate = list(range(len(dataset)))
+        print("使用测试集全量模式，评估所有样本")
     else:
         # 测试集模式
         from datasets.h5_dataset import generate_train_valid_test_dataset
