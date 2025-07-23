@@ -199,8 +199,8 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     plt.savefig(save_path)
     plt.close()
 
-    # 只在非gdm模型时返回距离
-    if (gsl_out is not None) and (source_pos is not None):
+    # 只在pred_pos和true_pos都已定义时返回距离
+    if ('pred_pos' in locals()) and ('true_pos' in locals()):
         distance = np.sqrt(np.sum((pred_pos - true_pos) ** 2)) / 10.0
         return distance
     else:
@@ -561,7 +561,7 @@ def get_test_set_indices(test_indices_str, dataset):
         print(f"可用索引范围：0 到 {len(dataset)-1}")
         return []
 
-def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch_size=16, num_workers=4):
+def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch_size=16, num_workers=4, max_visualize=10):
     """
     批量推理函数，仅用于all_generalization和all_test_set
     """
@@ -581,6 +581,7 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
     total_mse = 0
     total_ssim = 0
     valid_samples = 0
+    visualized = 0  # 可视化计数器
 
     with torch.no_grad():
         for i, batch in enumerate(tqdm(dataloader, desc="Batch Evaluating")):
@@ -622,12 +623,23 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
                 position_error = torch.sqrt(torch.sum((pred_pos - true_pos) ** 2, dim=1)) / 10.0
                 total_position_error += position_error.sum().item()
 
-            # 可选：只保存前几个batch的可视化
-            # if i < 3:
-            #     for j in range(lr.size(0)):
-            #         save_path = os.path.join(save_dir, f'batch_{i}_sample_{j}.png')
-            #         visualize_results(lr[j:j+1], hr[j:j+1], gdm_out[j:j+1], gsl_out[j:j+1] if gsl_out is not None else None,
-            #                          source_pos[j:j+1] if source_pos is not None else None, None, save_path)
+            # 只可视化前max_visualize个样本
+            if visualized < max_visualize:
+                batch_size_now = lr.size(0)
+                for j in range(batch_size_now):
+                    if visualized >= max_visualize:
+                        break
+                    save_path = os.path.join(save_dir, f'batch_{i}_sample_{j}.png')
+                    if model_type == 'swinir_gdm':
+                        visualize_results(lr[j:j+1], hr[j:j+1], gdm_out[j:j+1], None, None, None, save_path)
+                    else:
+                        visualize_results(
+                            lr[j:j+1], hr[j:j+1], gdm_out[j:j+1],
+                            gsl_out[j:j+1] if gsl_out is not None else None,
+                            source_pos[j:j+1] if source_pos is not None else None,
+                            None, save_path
+                        )
+                    visualized += 1
 
     # 输出平均指标
     if valid_samples > 0:
@@ -692,6 +704,8 @@ def main():
     model = model.to(device)
     model.eval()
     
+    use_batch = False  # <--- 增加这一行，默认不开启批处理
+
     # 加载数据集
     dataset = None
     # 根据测试模式选择要评估的样本
