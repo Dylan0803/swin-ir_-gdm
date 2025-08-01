@@ -46,7 +46,7 @@ def load_data_from_swinir_h5(filename, wind_group, source_group, time_step, scal
     根据 h5_dataset.py 的逻辑从H5文件中加载数据，并为KDM准备输入。
 
     :param filename: .h5 文件路径
-    :param wind_group: 风场组名称 (e.g., 'wind_0_5')
+    :param wind_group: 风场组名称 (e.g., 'wind1_0')
     :param source_group: 泄漏源组名称 (e.g., 's1')
     :param time_step: 时间步索引 (e.g., 1)
     :param scale_factor: 下采样比例，必须与生成LR数据时使用的一致
@@ -132,7 +132,7 @@ def get_gaussian_kdm_matrix(measure_mat,
         gama_sq = 1e-12
     sample_conc_mat_extend = np.where(distance_matrix < Rco ** 2, sample_conc_mat_extend, 0)
     distance_matrix = np.where(distance_matrix < Rco ** 2, distance_matrix, 0)
-    w_mat_extend = (1 / (2 * np.pi * gama_sq)) * np.exp(-(distance_matrix) / 2 / gama_sq)
+    w_mat_extend = (1 / (2 * np. pi* gama_sq)) * np.exp(-(distance_matrix) / 2 / gama_sq)
     conc = w_mat_extend * sample_conc_mat_extend
     w_sum = w_mat_extend.sum(axis=2)
     conc_sum = conc.sum(axis=2)
@@ -171,6 +171,11 @@ def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat):
         ax.axis('off')
         
     plt.tight_layout()
+    
+    # 保存图片
+    plt.savefig('gkdm_result.png', dpi=300, bbox_inches='tight')
+    print("图片已保存为 gkdm_result.png")
+    
     plt.show()
 
 
@@ -195,9 +200,9 @@ if __name__ == '__main__':
     h5_file_path = args.data_path
     
     # 想测试的样本 (风场, 泄漏源, 时间步)
-    wind_group_to_test = 'wind_0_5'
+    wind_group_to_test = 'wind1_0'
     source_group_to_test = 's1'
-    time_step_to_test = 10  # e.g., for HR_10, LR_10
+    time_step_to_test = 50  # e.g., for HR_10, LR_10
 
     # --- 2. 物理和实验参数 ---
     # 数据的真实物理尺寸 (单位: 米)
