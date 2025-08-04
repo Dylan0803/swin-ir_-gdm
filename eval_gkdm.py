@@ -52,7 +52,6 @@ def load_data_from_swinir_h5(filename, wind_group, source_group, time_step, scal
     :param scale_factor: 下采样比例，必须与生成LR数据时使用的一致
     :return: (gt_mat, lr_mat_from_file, sparse_mat_corrected, lr_index_mat)
     """
-    print(f"Loading data: Wind={wind_group}, Source={source_group}, Time={time_step}")
     try:
         with h5py.File(filename, 'r') as f:
             # 检查路径是否存在
@@ -191,7 +190,35 @@ def calculate_normalized_mse(gt_mat, reconstruct_mat):
     return mse_normalized
 
 
-
+def test_rco_parameters(h5_file_path, wind_group, source_group, time_step, 
+                       scale_factor, mat_real_size, rco_values):
+    """
+    测试不同Rco值对重建质量的影响，只返回归一化MSE
+    """
+    print("Starting Rco parameter test...")
+    gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
+        h5_file_path, wind_group, source_group, time_step, scale_factor
+    )
+    if gt_mat is None:
+        print("Data loading failed")
+        return [], []
+    rco_list = []
+    mse_normalized_list = []
+    for rco in rco_values:
+        gama = rco / 3.0
+        reconstruct_mat = get_gaussian_kdm_matrix(
+            measure_mat=sparse_mat,
+            mat_real_size=mat_real_size,
+            sample_index_mat=lr_index_mat,
+            sample_conc_mat=lr_mat,
+            Rco=rco,
+            Gama=gama
+        )
+        mse_normalized = calculate_normalized_mse(gt_mat, reconstruct_mat)
+        rco_list.append(rco)
+        mse_normalized_list.append(mse_normalized)
+        print(f"  Rco={rco}, Gama={gama:.4f}, MSE={mse_normalized:.6f}")
+    return rco_list, mse_normalized_list
 
 
 def parse_args():
@@ -201,10 +228,6 @@ def parse_args():
     # 必需参数
     parser.add_argument('--data_path', type=str, required=True,
                        help='H5 data file path (required)')
-    
-    # 新增：直接指定Rco值
-    parser.add_argument('--rco', type=float, required=True,
-                       help='Rco value to use for reconstruction (required)')
     
     # 保存目录参数
     parser.add_argument('--save_dir', type=str, default='gkdm_results',
@@ -220,6 +243,14 @@ def parse_args():
                       help='Generalization test sample specs, separated by semicolon, e.g.: wind1_0,s1,50;wind2_0,s2,30')
     parser.add_argument('--test_indices', type=str, default=None,
                       help='Test set indices, separated by comma, e.g.: 1,2,3,4,5')
+    
+    # Rco参数范围
+    parser.add_argument('--rco_start', type=float, default=0.1,
+                       help='Start value for Rco range')
+    parser.add_argument('--rco_end', type=float, default=3.0,
+                       help='End value for Rco range')
+    parser.add_argument('--rco_step', type=float, default=0.1,
+                       help='Step size for Rco range')
     
     # 物理参数
     parser.add_argument('--mat_width', type=float, default=9.6,
@@ -302,16 +333,18 @@ def get_test_set_indices(test_indices_str, h5_file_path):
         return []
 
 
-def evaluate_samples_with_fixed_rco(h5_file_path, sample_indices, rco_value, mat_real_size, scale_factor, save_dir):
-    """使用固定的Rco值评估多个样本，计算平均MSE"""
-    print(f"Evaluating {len(sample_indices)} samples with fixed Rco={rco_value}...")
+def evaluate_multiple_samples(h5_file_path, sample_indices, rco_values, mat_real_size, scale_factor, save_dir):
+    """评估多个样本，计算每个Rco的平均MSE，选择平均MSE最小的Rco"""
+    print(f"Evaluating {len(sample_indices)} samples...")
     
-    mse_values = []
-    gama = rco_value / 3.0
+    all_results = {}
+    for rco in rco_values:
+        all_results[rco] = []
+    
+    # 记录每个样本的最佳Rco值（用于对比分析）
+    sample_best_rcos = []
     
     for i, sample_info in enumerate(sample_indices):
-        print(f"\nEvaluating sample {i+1}/{len(sample_indices)}: {sample_info}")
-        
         # 加载数据
         gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
             h5_file_path,
@@ -325,42 +358,104 @@ def evaluate_samples_with_fixed_rco(h5_file_path, sample_indices, rco_value, mat
             print(f"Failed to load data for sample {i+1}")
             continue
         
-        # 使用指定的Rco值进行重建
-        reconstruct_mat = get_gaussian_kdm_matrix(
-            measure_mat=sparse_mat,
-            mat_real_size=mat_real_size,
-            sample_index_mat=lr_index_mat,
-            sample_conc_mat=lr_mat,
-            Rco=rco_value,
-            Gama=gama
-        )
+        # 测试不同Rco值，记录这个样本的所有MSE
+        sample_mse_results = {}
+        for rco in rco_values:
+            gama = rco / 3.0
+            reconstruct_mat = get_gaussian_kdm_matrix(
+                measure_mat=sparse_mat,
+                mat_real_size=mat_real_size,
+                sample_index_mat=lr_index_mat,
+                sample_conc_mat=lr_mat,
+                Rco=rco,
+                Gama=gama
+            )
+            
+            mse_normalized = calculate_normalized_mse(gt_mat, reconstruct_mat)
+            all_results[rco].append(mse_normalized)
+            sample_mse_results[rco] = mse_normalized
         
-        mse_normalized = calculate_normalized_mse(gt_mat, reconstruct_mat)
-        mse_values.append(mse_normalized)
-        
-        print(f"  Sample {i+1} MSE: {mse_normalized:.6f}")
+        # 找到这个样本的最佳Rco值（用于对比分析）
+        best_rco_for_sample = min(sample_mse_results, key=sample_mse_results.get)
+        sample_best_rcos.append(best_rco_for_sample)
     
-    if mse_values:
-        avg_mse = np.mean(mse_values)
-        std_mse = np.std(mse_values)
-        print(f"\n=== Results Summary ===")
-        print(f"Rco value: {rco_value}")
-        print(f"Number of samples: {len(mse_values)}")
-        print(f"Average MSE: {avg_mse:.6f}")
-        print(f"Standard deviation MSE: {std_mse:.6f}")
-        print(f"Min MSE: {min(mse_values):.6f}")
-        print(f"Max MSE: {max(mse_values):.6f}")
-        
-        return avg_mse, std_mse, mse_values
-    else:
-        print("No valid samples evaluated!")
-        return None, None, []
+    # 计算每个Rco的平均MSE
+    avg_mse_per_rco = {}
+    for rco in rco_values:
+        if all_results[rco]:  # 确保有数据
+            avg_mse_per_rco[rco] = np.mean(all_results[rco])
+        else:
+            avg_mse_per_rco[rco] = float('inf')  # 如果没有数据，设为无穷大
+    
+    # 找到平均MSE最小的Rco值
+    best_rco = min(avg_mse_per_rco, key=avg_mse_per_rco.get)
+    best_avg_mse = avg_mse_per_rco[best_rco]
+    
+    # 统计每个Rco值被选为最佳的次数（用于对比分析）
+    rco_counts = {}
+    for rco in rco_values:
+        rco_counts[rco] = sample_best_rcos.count(rco)
+    
+    print(f"\n=== Average MSE Analysis ===")
+    for rco in sorted(rco_values):
+        if avg_mse_per_rco[rco] != float('inf'):
+            print(f"Rco={rco}: Average MSE = {avg_mse_per_rco[rco]:.6f}")
+    
+    print(f"\n=== Final Selection ===")
+    print(f"Best Rco by average MSE: {best_rco} (Average MSE={best_avg_mse:.6f})")
+    
+    return best_rco, best_avg_mse, rco_counts, sample_best_rcos, avg_mse_per_rco
+
+
+def plot_rco_vs_mse(rco_list, mse_normalized_list, save_path='rco_vs_mse.png'):
+    """绘制Rco值与归一化MSE的关系图"""
+    plt.figure(figsize=(10, 6))
+    plt.plot(rco_list, mse_normalized_list, 'bo-', linewidth=2, markersize=8, label='MSE')
+    best_mse_idx = np.argmin(mse_normalized_list)
+    best_rco = rco_list[best_mse_idx]
+    best_mse = mse_normalized_list[best_mse_idx]
+    plt.plot(best_rco, best_mse, 'ro', markersize=12, 
+             label=f'Best MSE (Rco={best_rco}, MSE={best_mse:.6f})')
+    plt.xlabel('Rco Value', fontsize=12)
+    plt.ylabel('MSE', fontsize=12)
+    plt.title('Effect of Rco Value on MSE', fontsize=14)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Rco vs MSE plot saved as {save_path}")
+    plt.show()
+    return best_rco, best_mse
 
 
 
 
-
-
+def plot_average_mse_vs_rco(rco_values, avg_mse_per_rco, best_rco, save_path='average_mse_vs_rco.png'):
+    """绘制平均MSE vs Rco的关系图"""
+    plt.figure(figsize=(10, 6))
+    
+    # 准备数据
+    rco_list = sorted(rco_values)
+    mse_list = [avg_mse_per_rco[rco] for rco in rco_list]
+    
+    plt.plot(rco_list, mse_list, 'bo-', linewidth=2, markersize=8, label='Average MSE')
+    
+    # 标记最佳Rco值
+    best_mse = avg_mse_per_rco[best_rco]
+    plt.plot(best_rco, best_mse, 'ro', markersize=12, 
+             label=f'Best Average MSE (Rco={best_rco}, MSE={best_mse:.6f})')
+    
+    plt.xlabel('Rco Value', fontsize=12)
+    plt.ylabel('Average MSE', fontsize=12)
+    plt.title('Average MSE vs Rco Value Across All Samples', fontsize=14)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Average MSE vs Rco plot saved as {save_path}")
+    plt.show()
+    
+    return best_rco, best_mse
 
 
 if __name__ == '__main__':
@@ -373,13 +468,16 @@ if __name__ == '__main__':
     h5_file_path = args.data_path
     mat_real_size = (args.mat_width, args.mat_height)
     scale_factor = args.scale_factor
-    rco_value = args.rco
     
-    print("--- Starting GKDM Evaluation with Fixed Rco ---")
+    # 生成Rco值范围
+    rco_values = [round(x, 2) for x in np.arange(args.rco_start, args.rco_end + args.rco_step, args.rco_step)]
+    
+    print("--- Starting GKDM Parameter Test ---")
     print(f"Data file path: {h5_file_path}")
     print(f"Save directory: {args.save_dir}")
     print(f"Test mode: {args.test_mode}")
-    print(f"Fixed Rco value: {rco_value}")
+    print(f"Rco range: {args.rco_start} to {args.rco_end}, step: {args.rco_step}")
+    print(f"Testing Rco values: {rco_values}")
     
     # 根据测试模式选择样本
     sample_indices = []
@@ -420,34 +518,71 @@ if __name__ == '__main__':
         print("No samples to evaluate!")
         exit(1)
     
-    # 使用固定Rco值评估样本
-    avg_mse, std_mse, mse_values = evaluate_samples_with_fixed_rco(
-        h5_file_path, sample_indices, rco_value, mat_real_size, scale_factor, args.save_dir
-    )
-    
-    if avg_mse is not None:
-        print(f"\n=== Final Results ===")
-        print(f"Rco: {rco_value}")
-        print(f"Average MSE: {avg_mse:.6f}")
-        print(f"Standard deviation: {std_mse:.6f}")
+    # 评估多个样本
+    if len(sample_indices) > 1:
+        best_rco, avg_mse, rco_counts, sample_best_rcos, avg_mse_per_rco = evaluate_multiple_samples(h5_file_path, sample_indices, rco_values, mat_real_size, scale_factor, args.save_dir)
         
-        # 使用第一个样本进行可视化
-        print(f"\nGenerating visualization for first sample...")
-        sample_info = sample_indices[0]
+        # 绘制平均MSE vs Rco图
+        plot_average_mse_vs_rco(rco_values, avg_mse_per_rco, best_rco, os.path.join(args.save_dir, 'average_mse_vs_rco.png'))
+        
+        print(f"\n=== Test Results Summary ===")
+        print(f"Best Rco by average MSE: {best_rco}, Average MSE: {avg_mse:.6f}")
+        
+        # 使用最佳参数进行最终重建
+        print(f"\nReconstructing with best parameters...")
+        sample_info = sample_indices[0]  # 使用第一个样本进行可视化
         gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
             h5_file_path, sample_info['wind_group'], sample_info['source_group'], sample_info['time_step'], scale_factor
         )
         
         if gt_mat is not None:
-            gama = rco_value / 3.0
+            # 手动指定Rco
+            custom_rco = best_rco # 用于测试Rco值
             reconstruct_mat = get_gaussian_kdm_matrix(
                 measure_mat=sparse_mat,
                 mat_real_size=mat_real_size,
                 sample_index_mat=lr_index_mat,
                 sample_conc_mat=lr_mat,
-                Rco=rco_value,
-                Gama=gama
+                Rco=custom_rco,
+                Gama=custom_rco/3.0
             )
-            gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=rco_value)
+            gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=custom_rco)
     else:
-        print("Evaluation failed!")
+        # 单样本测试（原有逻辑保持不变）
+        sample_info = sample_indices[0]
+        rco_list, mse_normalized_list = test_rco_parameters(
+            h5_file_path,
+            sample_info['wind_group'],
+            sample_info['source_group'],
+            sample_info['time_step'],
+            scale_factor,
+            mat_real_size,
+            rco_values
+        )
+        
+        if rco_list:
+            best_rco, best_mse = plot_rco_vs_mse(rco_list, mse_normalized_list, os.path.join(args.save_dir, 'rco_vs_mse.png'))
+            
+            print(f"\n=== Test Results Summary ===")
+            print(f"Best MSE Rco value: {best_rco}, MSE: {best_mse:.6f}")
+            print(f"All results:")
+            for i, rco in enumerate(rco_list):
+                print(f"  Rco={rco}: MSE={mse_normalized_list[i]:.6f}")
+            
+            print(f"\nReconstructing with best parameters...")
+            gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
+                h5_file_path, sample_info['wind_group'], sample_info['source_group'], sample_info['time_step'], scale_factor
+            )
+            
+            if gt_mat is not None:
+                reconstruct_mat = get_gaussian_kdm_matrix(
+                    measure_mat=sparse_mat,
+                    mat_real_size=mat_real_size,
+                    sample_index_mat=lr_index_mat,
+                    sample_conc_mat=lr_mat,
+                    Rco=best_rco,
+                    Gama=best_rco/3.0
+                )
+                gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=best_rco)
+        else:
+            print("Parameter test failed")
