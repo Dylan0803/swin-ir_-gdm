@@ -40,7 +40,7 @@ def down_sample_2D_verbose(mat, scale_factor):
     return output_lr_mat, output_sparse_mat, output_lr_index_mat
 
 
-# ADDED: 全新的数据加载函数，以匹配你的 h5_dataset.py 逻辑
+#全新的数据加载函数，以匹配h5_dataset.py 逻辑
 def load_data_from_swinir_h5(filename, wind_group, source_group, time_step, scale_factor):
     """
     根据 h5_dataset.py 的逻辑从H5文件中加载数据，并为KDM准备输入。
@@ -141,11 +141,17 @@ def get_gaussian_kdm_matrix(measure_mat,
 
 
 # 可视化流程函数，更新了一下标题使其更精确
-def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat):
+def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None):
     """
-    可视化KDM的输入和输出
+    可视化KDM的输入和输出（去除sparse_mat_corrected，只保留3个子图）
     """
-    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
+    # 检查数据范围
+    print(f"Visualization data ranges:")
+    print(f"  GT: [{gt_mat.min():.6f}, {gt_mat.max():.6f}]")
+    print(f"  LR: [{lr_mat.min():.6f}, {lr_mat.max():.6f}]")
+    print(f"  Reconstruct: [{reconstruct_mat.min():.6f}, {reconstruct_mat.max():.6f}]")
+    reconstruct_mat_clipped = np.clip(reconstruct_mat, gt_mat.min(), gt_mat.max())
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     
     # 真实值
     im1 = axes[0].imshow(gt_mat, cmap='viridis')
@@ -154,110 +160,137 @@ def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat):
 
     # 低分辨率图 (从文件加载)
     im2 = axes[1].imshow(lr_mat, cmap='viridis')
-    axes[1].set_title('Low-Resolution (from file)')
+    axes[1].set_title('LR')
     fig.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
-
-    # 稀疏采样点 (重建后)
-    im3 = axes[2].imshow(sparse_mat, cmap='viridis')
-    axes[2].set_title(f'Corrected Sparse Matrix')
+    # 第三个子图标题增加Rco值
+    if rco_value is not None:
+        axes[2].set_title(f'KDM (Rco={rco_value})')
+    else:
+        axes[2].set_title('KDM')
+    im3 = axes[2].imshow(reconstruct_mat_clipped, cmap='viridis')
     fig.colorbar(im3, ax=axes[2], fraction=0.046, pad=0.04)
-
-    # 重建结果
-    im4 = axes[3].imshow(reconstruct_mat, cmap='viridis')
-    axes[3].set_title('GKDM Reconstruction')
-    fig.colorbar(im4, ax=axes[3], fraction=0.046, pad=0.04)
-
     for ax in axes:
         ax.axis('off')
-        
     plt.tight_layout()
-    
-    # 保存图片
     plt.savefig('gkdm_result.png', dpi=300, bbox_inches='tight')
-    print("图片已保存为 gkdm_result.png")
-    
+    print("Image saved as gkdm_result.png")
     plt.show()
 
 
-if __name__ == '__main__':
-    # =======================================================================
-    #  命令行参数解析
-    # =======================================================================
-    parser = argparse.ArgumentParser(description='GKDM (Gaussian Kernel Density Mapping) 重建算法')
-    
-    # 必需参数
-    parser.add_argument('--data_path', type=str, required=True,
-                       help='H5数据文件路径 (必需)')
-    
-    args = parser.parse_args()
-    
-    # =======================================================================
-    #  TODO: 请在这里根据你的数据修改以下参数
-    # =======================================================================
+def calculate_normalized_mse(gt_mat, reconstruct_mat):
+    """
+    计算归一化MSE，将重建结果归一化到GT范围后再计算MSE
+    """
+    gt_range = gt_mat.max() - gt_mat.min()
+    recon_range = reconstruct_mat.max() - reconstruct_mat.min()
+    if recon_range > 0:
+        reconstruct_normalized = (reconstruct_mat - reconstruct_mat.min()) / recon_range * gt_range + gt_mat.min()
+    else:
+        reconstruct_normalized = np.zeros_like(reconstruct_mat)
+    mse_normalized = np.mean((gt_mat - reconstruct_normalized) ** 2)
+    return mse_normalized
 
-    # --- 1. 数据集参数 ---
-    # 使用命令行传入的数据路径
+
+def test_rco_parameters(h5_file_path, wind_group, source_group, time_step, 
+                       scale_factor, mat_real_size, rco_values):
+    """
+    测试不同Rco值对重建质量的影响，只返回归一化MSE
+    """
+    print("Starting Rco parameter test...")
+    gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
+        h5_file_path, wind_group, source_group, time_step, scale_factor
+    )
+    if gt_mat is None:
+        print("Data loading failed")
+        return [], []
+    rco_list = []
+    mse_normalized_list = []
+    for rco in rco_values:
+        gama = rco / 3.0
+        reconstruct_mat = get_gaussian_kdm_matrix(
+            measure_mat=sparse_mat,
+            mat_real_size=mat_real_size,
+            sample_index_mat=lr_index_mat,
+            sample_conc_mat=lr_mat,
+            Rco=rco,
+            Gama=gama
+        )
+        mse_normalized = calculate_normalized_mse(gt_mat, reconstruct_mat)
+        rco_list.append(rco)
+        mse_normalized_list.append(mse_normalized)
+        print(f"  Rco={rco}, Gama={gama:.4f}, MSE={mse_normalized:.6f}")
+    return rco_list, mse_normalized_list
+
+
+def plot_rco_vs_mse(rco_list, mse_normalized_list, save_path='rco_vs_mse.png'):
+    """
+    绘制Rco值与归一化MSE的关系图
+    """
+    plt.figure(figsize=(10, 6))
+    plt.plot(rco_list, mse_normalized_list, 'bo-', linewidth=2, markersize=8, label='MSE')
+    best_mse_idx = np.argmin(mse_normalized_list)
+    best_rco = rco_list[best_mse_idx]
+    best_mse = mse_normalized_list[best_mse_idx]
+    plt.plot(best_rco, best_mse, 'ro', markersize=12, 
+             label=f'Best MSE (Rco={best_rco}, MSE={best_mse:.6f})')
+    plt.xlabel('Rco Value', fontsize=12)
+    plt.ylabel('MSE', fontsize=12)
+    plt.title('Effect of Rco Value on MSE', fontsize=14)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Rco vs MSE plot saved as {save_path}")
+    plt.show()
+    return best_rco, best_mse
+
+# 主流程部分调用同步精简
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='GKDM (Gaussian Kernel Density Mapping) Reconstruction Algorithm')
+    parser.add_argument('--data_path', type=str, required=True,
+                       help='H5 data file path (required)')
+    args = parser.parse_args()
     h5_file_path = args.data_path
-    
-    # 想测试的样本 (风场, 泄漏源, 时间步)
     wind_group_to_test = 'wind1_0'
     source_group_to_test = 's1'
-    time_step_to_test = 50  # e.g., for HR_10, LR_10
-
-    # --- 2. 物理和实验参数 ---
-    # 数据的真实物理尺寸 (单位: 米)
+    time_step_to_test = 50
     mat_real_size = (9.6, 9.6) 
-    
-    # TODO: (非常重要) 必须与生成LR数据时用的下采样因子一致
     scale_factor = 6 
-
-    # --- 3. KDM算法超参数 (建议调整以获得最佳效果) ---
-    # TODO: 尝试调整 Rco (截断半径) 和 Gama (高斯核标准差)
-    Rco_value = 2.5
-    Gama_value = Rco_value / 3.0
-
-    # =======================================================================
-    #  执行流程 (通常无需修改以下部分)
-    # =======================================================================
-    
-    print("--- Starting GKDM Test with Command Line Data Path ---")
-    print(f"数据文件路径: {h5_file_path}")
-    
-    # 1. 使用新的加载函数加载所有需要的数据
-    gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
+    # rco_values: 0到3，步长0.1
+    rco_values = [round(x, 2) for x in np.arange(0, 3.01, 0.1)]
+    print("--- Starting Rco Parameter Test ---")
+    print(f"Data file path: {h5_file_path}")
+    print(f"Using data: Wind={wind_group_to_test}, Source={source_group_to_test}, Time={time_step_to_test}")
+    print(f"Testing Rco values: {rco_values}")
+    rco_list, mse_normalized_list = test_rco_parameters(
         h5_file_path,
         wind_group_to_test,
         source_group_to_test,
         time_step_to_test,
-        scale_factor
+        scale_factor,
+        mat_real_size,
+        rco_values
     )
-    
-    # 2. 检查数据是否加载成功
-    if gt_mat is not None:
-        print(f"Data loaded successfully. GT shape: {gt_mat.shape}, LR shape: {lr_mat.shape}")
-
-        # 3. 执行KDM重建
-        print(f"Running GKDM with Rco={Rco_value}, Gama={Gama_value:.4f}")
-        time_start = time.time()
-        # KDM算法的输入:
-        # - measure_mat: 使用我们修正后的稀疏矩阵
-        # - sample_index_mat: 使用down_sample生成的坐标矩阵
-        # - sample_conc_mat: 使用从文件中加载的低分辨率矩阵
-        reconstruct_mat = get_gaussian_kdm_matrix(
-            measure_mat=sparse_mat, 
-            mat_real_size=mat_real_size, 
-            sample_index_mat=lr_index_mat, 
-            sample_conc_mat=lr_mat, 
-            Rco=Rco_value, 
-            Gama=Gama_value
+    if rco_list:
+        best_rco, best_mse = plot_rco_vs_mse(rco_list, mse_normalized_list)
+        print(f"\n=== Test Results Summary ===")
+        print(f"Best MSE Rco value: {best_rco}, MSE: {best_mse:.6f}")
+        print(f"All results:")
+        for i, rco in enumerate(rco_list):
+            print(f"  Rco={rco}: MSE={mse_normalized_list[i]:.6f}")
+        print(f"\nReconstructing with best parameters...")
+        gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
+            h5_file_path, wind_group_to_test, source_group_to_test, time_step_to_test, scale_factor
         )
-        time_end = time.time()
-        print(f'Reconstruction time: {time_end - time_start:.4f}s')
-
-        # 4. 可视化结果
-        gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat)
-
+        if gt_mat is not None:
+            reconstruct_mat = get_gaussian_kdm_matrix(
+                measure_mat=sparse_mat,
+                mat_real_size=mat_real_size,
+                sample_index_mat=lr_index_mat,
+                sample_conc_mat=lr_mat,
+                Rco=best_rco,
+                Gama=best_rco/3.0
+            )
+            gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=best_rco)
     else:
-        print("\n--- GKDM Test Failed: Data could not be loaded. Please check parameters and file paths. ---")
-        print("使用示例:")
-        print("python gkdm.py --data_path your_data.h5")
+        print("Parameter test failed")
