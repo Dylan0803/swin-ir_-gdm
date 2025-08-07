@@ -153,10 +153,10 @@ def get_gaussian_kdm_matrix(measure_mat,
     return reconstruct_mat
 
 
-# 可视化流程函数，更新了一下标题使其更精确
-def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None):
+def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None, save_path='gkdm_result.png'):
     """
     可视化KDM的输入和输出（去除sparse_mat_corrected，只保留3个子图）
+    不在每个子图右侧显示图例（颜色条）
     """
     # 检查数据范围
     print(f"Visualization data ranges:")
@@ -171,24 +171,24 @@ def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None):
     # 真实值
     im1 = axes[0].imshow(gt_mat, cmap='viridis')
     axes[0].set_title('Ground Truth (HR)')
-    fig.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
 
     # 低分辨率图 (从文件加载)
     im2 = axes[1].imshow(lr_mat, cmap='viridis')
     axes[1].set_title('LR')
-    fig.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
+
     # 第三个子图标题增加Rco值
     if rco_value is not None:
         axes[2].set_title(f'KDM (Rco={rco_value})')
     else:
         axes[2].set_title('KDM')
     im3 = axes[2].imshow(reconstruct_mat_clipped, cmap='viridis')
-    fig.colorbar(im3, ax=axes[2], fraction=0.046, pad=0.04)
+
     for ax in axes:
         ax.axis('off')
+
     plt.tight_layout()
-    plt.savefig('gkdm_result.png', dpi=300, bbox_inches='tight')
-    print("Image saved as gkdm_result.png")
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Image saved as {save_path}")
     plt.show()
 
 
