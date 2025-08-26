@@ -189,6 +189,23 @@ def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None, save_
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f"Image saved as {save_path}")
+
+    # 保存用于后期处理的数据（CSV），便于在 Origin 等软件中进一步调整
+    try:
+        save_dir = os.path.dirname(
+            save_path) if os.path.dirname(save_path) else '.'
+        base_name = os.path.splitext(os.path.basename(save_path))[0]
+        gt_csv_path = os.path.join(save_dir, f"{base_name}_GT.csv")
+        lr_csv_path = os.path.join(save_dir, f"{base_name}_LR.csv")
+        recon_csv_path = os.path.join(save_dir, f"{base_name}_Reconstruct.csv")
+        np.savetxt(gt_csv_path, gt_mat, delimiter=',', fmt='%.10g')
+        np.savetxt(lr_csv_path, lr_mat, delimiter=',', fmt='%.10g')
+        np.savetxt(recon_csv_path, reconstruct_mat_clipped,
+                   delimiter=',', fmt='%.10g')
+        print(f"Data saved: {gt_csv_path}, {lr_csv_path}, {recon_csv_path}")
+    except Exception as e:
+        print(f"Warning: failed to save CSV data for gkdm_result: {e}")
+
     plt.show()
 
 
@@ -465,6 +482,21 @@ def plot_rco_vs_mse(rco_list, mse_normalized_list, save_path='rco_vs_mse.png'):
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f"Rco vs MSE plot saved as {save_path}")
+
+    # 保存曲线数据为 CSV，便于在 Origin 等软件中重绘
+    try:
+        save_dir = os.path.dirname(
+            save_path) if os.path.dirname(save_path) else '.'
+        base_name = os.path.splitext(os.path.basename(save_path))[0]
+        csv_path = os.path.join(save_dir, f"{base_name}_data.csv")
+        data_mat = np.column_stack(
+            (np.asarray(rco_list), np.asarray(mse_normalized_list)))
+        np.savetxt(csv_path, data_mat, delimiter=',',
+                   fmt='%.10g', header='Rco,MSE', comments='')
+        print(f"Data saved: {csv_path}")
+    except Exception as e:
+        print(f"Warning: failed to save CSV data for rco_vs_mse: {e}")
+
     plt.show()
     return best_rco, best_mse
 
