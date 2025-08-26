@@ -170,23 +170,29 @@ def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None, save_
 
     # 真实值
     im1 = axes[0].imshow(gt_mat, cmap='viridis')
-    axes[0].set_title('Ground Truth (HR)')
+    axes[0].text(0.5, -0.08, '(a) Ground Truth (HR)', transform=axes[0].transAxes,
+                 ha='center', va='top', fontsize=14)
 
     # 低分辨率图 (从文件加载)
     im2 = axes[1].imshow(lr_mat, cmap='viridis')
-    axes[1].set_title('LR')
+    axes[1].text(0.5, -0.08, '(b) LR', transform=axes[1].transAxes,
+                 ha='center', va='top', fontsize=14)
 
     # 第三个子图标题增加Rco值
     if rco_value is not None:
-        axes[2].set_title(f'KDM (Rco={rco_value})')
+        axes[2].text(0.5, -0.08, f'(c) KDM (Rco={rco_value})', transform=axes[2].transAxes,
+                     ha='center', va='top', fontsize=14)
     else:
-        axes[2].set_title('KDM')
+        axes[2].text(0.5, -0.08, '(c) KDM', transform=axes[2].transAxes,
+                     ha='center', va='top', fontsize=14)
     im3 = axes[2].imshow(reconstruct_mat_clipped, cmap='viridis')
 
     for ax in axes:
         ax.axis('off')
 
     plt.tight_layout()
+    # 确保底部题注不被裁剪
+    plt.subplots_adjust(bottom=0.15)
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f"Image saved as {save_path}")
 
