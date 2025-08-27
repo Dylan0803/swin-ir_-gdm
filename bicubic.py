@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import torch
 import numpy as np
@@ -19,37 +20,37 @@ from argparse import Namespace
 from scipy.interpolate import griddata
 from scipy.ndimage import zoom
 
-# 添加项目根目录到Python路径
+# Add project root directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
 
 class BicubicInterpolation:
     """
-    双三次插值算法实现气体分布重建
+    Bicubic interpolation algorithm for gas distribution reconstruction
     """
 
     def __init__(self, upscale_factor=6):
         """
-        初始化双三次插值器
-        
-        参数:
-            upscale_factor: 上采样倍数，默认6
+        Initialize bicubic interpolator
+
+        Args:
+            upscale_factor: upsampling factor, default 6
         """
         self.upscale_factor = upscale_factor
 
     def interpolate(self, lr_data):
         """
-        使用双三次插值重建高分辨率气体分布
-        
-        参数:
-            lr_data: 低分辨率数据 [batch_size, 1, H, W] 或 [1, H, W]
-            
-        返回:
-            hr_data: 高分辨率数据 [batch_size, 1, H*upscale, W*upscale] 或 [1, H*upscale, W*upscale]
+        Reconstruct high-resolution gas distribution using bicubic interpolation
+
+        Args:
+            lr_data: low-resolution data [batch_size, 1, H, W] or [1, H, W]
+
+        Returns:
+            hr_data: high-resolution data [batch_size, 1, H*upscale, W*upscale] or [1, H*upscale, W*upscale]
         """
         if len(lr_data.shape) == 4:
-            # 批处理模式
+            # Batch mode
             batch_size = lr_data.shape[0]
             hr_results = []
 
@@ -59,51 +60,51 @@ class BicubicInterpolation:
 
             return torch.stack(hr_results, dim=0)
         else:
-            # 单样本模式
+            # Single sample mode
             return self._single_interpolate(lr_data)
 
     def _single_interpolate(self, lr_data):
         """
-        对单个样本进行双三次插值
-        
-        参数:
-            lr_data: 低分辨率数据 [1, H, W]
-            
-        返回:
-            hr_data: 高分辨率数据 [1, H*upscale, W*upscale]
+        Perform bicubic interpolation on a single sample
+
+        Args:
+            lr_data: low-resolution data [1, H, W]
+
+        Returns:
+            hr_data: high-resolution data [1, H*upscale, W*upscale]
         """
-        # 转换为numpy数组并移除通道维度
+        # Convert to numpy array and remove channel dimension
         lr_np = lr_data.squeeze().cpu().numpy()
 
-        # 获取原始尺寸
+        # Get original dimensions
         h, w = lr_np.shape
 
-        # 计算目标尺寸
+        # Calculate target dimensions
         target_h = h * self.upscale_factor
         target_w = w * self.upscale_factor
 
-        # 创建目标网格
+        # Create target grid
         x_old = np.linspace(0, 1, w)
         y_old = np.linspace(0, 1, h)
         x_new = np.linspace(0, 1, target_w)
         y_new = np.linspace(0, 1, target_h)
 
-        # 创建网格点
+        # Create grid points
         X_old, Y_old = np.meshgrid(x_old, y_old)
         X_new, Y_new = np.meshgrid(x_new, y_new)
 
-        # 使用scipy的griddata进行双三次插值
+        # Use scipy griddata for bicubic interpolation
         points = np.column_stack((X_old.flatten(), Y_old.flatten()))
         values = lr_np.flatten()
 
-        # 双三次插值
+        # Bicubic interpolation
         hr_np = griddata(points, values, (X_new, Y_new),
                          method='cubic', fill_value=0)
 
-        # 处理边界和异常值
+        # Handle boundaries and outliers
         hr_np = np.clip(hr_np, 0, 1)
 
-        # 转换回tensor并添加通道维度
+        # Convert back to tensor and add channel dimension
         hr_tensor = torch.from_numpy(hr_np).float().unsqueeze(0)
 
         return hr_tensor
@@ -111,40 +112,40 @@ class BicubicInterpolation:
 
 def test_dataset_loading(data_path, num_samples=3):
     """
-    测试数据集加载功能
-    
-    参数:
-        data_path: 数据集路径
-        num_samples: 测试样本数量
+    Test dataset loading functionality
+
+    Args:
+        data_path: dataset path
+        num_samples: number of test samples
     """
-    print(f"=== 测试数据集加载 ===")
-    print(f"数据集路径: {data_path}")
+    print("=== Testing Dataset Loading ===")
+    print(f"Dataset path: {data_path}")
 
     try:
-        # 创建数据集
+        # Create dataset
         dataset = MultiTaskDataset(data_path)
-        print(f"数据集大小: {len(dataset)} 个样本")
+        print(f"Dataset size: {len(dataset)} samples")
 
-        # 测试加载几个样本
+        # Test loading several samples
         for i in range(min(num_samples, len(dataset))):
-            print(f"\n--- 样本 {i+1} ---")
+            print(f"\n--- Sample {i+1} ---")
             sample = dataset[i]
 
-            # 打印数据形状和基本信息
-            print(f"LR形状: {sample['lr'].shape}")
-            print(f"HR形状: {sample['hr'].shape}")
+            # Print data shape and basic information
+            print(f"LR shape: {sample['lr'].shape}")
+            print(f"HR shape: {sample['hr'].shape}")
             print(
-                f"LR值范围: [{sample['lr'].min():.4f}, {sample['lr'].max():.4f}]")
+                f"LR value range: [{sample['lr'].min():.4f}, {sample['lr'].max():.4f}]")
             print(
-                f"HR值范围: [{sample['hr'].min():.4f}, {sample['hr'].max():.4f}]")
+                f"HR value range: [{sample['hr'].min():.4f}, {sample['hr'].max():.4f}]")
 
-            # 如果有源位置信息
+            # If source position information exists
             if 'source_pos' in sample:
-                print(f"源位置: {sample['source_pos']}")
+                print(f"Source position: {sample['source_pos']}")
             if 'hr_max_pos' in sample:
-                print(f"HR最大值位置: {sample['hr_max_pos']}")
+                print(f"HR max position: {sample['hr_max_pos']}")
 
-            # 可视化第一个样本
+            # Visualize first sample
             if i == 0:
                 plt.figure(figsize=(12, 4))
 
@@ -170,50 +171,50 @@ def test_dataset_loading(data_path, num_samples=3):
                 plt.savefig('dataset_test_visualization.png',
                             dpi=150, bbox_inches='tight')
                 plt.show()
-                print("可视化结果已保存为 'dataset_test_visualization.png'")
+                print("Visualization saved as 'dataset_test_visualization.png'")
 
         return True
 
     except Exception as e:
-        print(f"数据集加载失败: {e}")
+        print(f"Dataset loading failed: {e}")
         return False
 
 
 def test_bicubic_interpolation(data_path, num_samples=2):
     """
-    测试双三次插值算法
-    
-    参数:
-        data_path: 数据集路径
-        num_samples: 测试样本数量
+    Test bicubic interpolation algorithm
+
+    Args:
+        data_path: dataset path
+        num_samples: number of test samples
     """
-    print(f"\n=== 测试双三次插值算法 ===")
+    print(f"\n=== Testing Bicubic Interpolation Algorithm ===")
 
     try:
-        # 创建数据集和数据加载器
+        # Create dataset and dataloader
         dataset = MultiTaskDataset(data_path)
         dataloader = DataLoader(dataset, batch_size=num_samples, shuffle=False)
 
-        # 创建双三次插值器
+        # Create bicubic interpolator
         bicubic_interpolator = BicubicInterpolation(upscale_factor=6)
 
-        # 获取一个批次的数据
+        # Get one batch of data
         batch = next(iter(dataloader))
         lr = batch['lr']
         hr_true = batch['hr']
 
-        print(f"输入LR形状: {lr.shape}")
-        print(f"真实HR形状: {hr_true.shape}")
+        print(f"Input LR shape: {lr.shape}")
+        print(f"True HR shape: {hr_true.shape}")
 
-        # 进行双三次插值
+        # Perform bicubic interpolation
         hr_pred = bicubic_interpolator.interpolate(lr)
-        print(f"预测HR形状: {hr_pred.shape}")
+        print(f"Predicted HR shape: {hr_pred.shape}")
 
-        # 计算评估指标
+        # Calculate evaluation metrics
         for i in range(lr.size(0)):
-            print(f"\n--- 样本 {i+1} 评估结果 ---")
+            print(f"\n--- Sample {i+1} Evaluation Results ---")
 
-            # 转换为numpy进行评估
+            # Convert to numpy for evaluation
             pred_np = hr_pred[i].squeeze().numpy()
             true_np = hr_true[i].squeeze().numpy()
 
@@ -231,7 +232,7 @@ def test_bicubic_interpolation(data_path, num_samples=2):
             print(f"SSIM: {ssim_val:.4f}")
             print(f"MSE: {mse:.6f}")
 
-            # 可视化结果
+            # Visualize results
             plt.figure(figsize=(15, 5))
 
             plt.subplot(1, 4, 1)
@@ -259,54 +260,55 @@ def test_bicubic_interpolation(data_path, num_samples=2):
             plt.savefig(
                 f'bicubic_test_sample_{i+1}.png', dpi=150, bbox_inches='tight')
             plt.show()
-            print(f"可视化结果已保存为 'bicubic_test_sample_{i+1}.png'")
+            print(f"Visualization saved as 'bicubic_test_sample_{i+1}.png'")
 
         return True
 
     except Exception as e:
-        print(f"双三次插值测试失败: {e}")
+        print(f"Bicubic interpolation test failed: {e}")
         import traceback
         traceback.print_exc()
         return False
 
 
 def parse_args():
-    """解析命令行参数"""
+    """Parse command line arguments"""
     parser = argparse.ArgumentParser(
         description='Test Dataset Loading and Bicubic Interpolation')
 
     parser.add_argument('--data_path', type=str, required=True,
-                        help='数据集路径 (.h5文件)')
+                        help='Dataset path (.h5 file)')
     parser.add_argument('--num_samples', type=int, default=3,
-                        help='测试样本数量')
+                        help='Number of test samples')
 
     args = parser.parse_args()
     return args
 
 
 def main():
-    """主函数 - 测试数据集加载和双三次插值"""
+    """Main function - test dataset loading and bicubic interpolation"""
     args = parse_args()
 
-    print("开始测试数据集加载和双三次插值算法...")
+    print("Starting dataset loading and bicubic interpolation algorithm test...")
     print("=" * 50)
 
-    # 测试数据集加载
+    # Test dataset loading
     dataset_ok = test_dataset_loading(args.data_path, args.num_samples)
 
     if dataset_ok:
-        # 测试双三次插值
+        # Test bicubic interpolation
         bicubic_ok = test_bicubic_interpolation(
             args.data_path, min(args.num_samples, 2))
 
         if bicubic_ok:
             print("\n" + "=" * 50)
-            print("? 所有测试通过！")
-            print("数据集可以正确加载，双三次插值算法工作正常。")
+            print("? All tests passed!")
+            print(
+                "Dataset can be loaded correctly, bicubic interpolation algorithm works normally.")
         else:
-            print("\n? 双三次插值测试失败")
+            print("\n? Bicubic interpolation test failed")
     else:
-        print("\n? 数据集加载测试失败")
+        print("\n? Dataset loading test failed")
 
 
 if __name__ == '__main__':
