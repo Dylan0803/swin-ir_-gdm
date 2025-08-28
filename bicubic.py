@@ -21,71 +21,71 @@ from scipy.interpolate import griddata
 from scipy.ndimage import zoom, gaussian_filter
 from scipy.signal import savgol_filter
 
-# Ìí¼ÓÏîÄ¿¸ùÄ¿Â¼µ½PythonÂ·¾¶
+# æ·»åŠ é¡¹ç›®æ ¹ç›®å½•åˆ°Pythonè·¯å¾„
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
 
 class AdvancedBicubicInterpolation:
     """
-    ¸ß¼¶Ë«Èı´Î²åÖµËã·¨£¬Ö§³Ö¶àÖÖ¿Éµ÷²ÎÊıÓÅ»¯
+    é«˜çº§åŒä¸‰æ¬¡æ’å€¼ç®—æ³•ï¼Œæ”¯æŒå¤šç§å¯è°ƒå‚æ•°ä¼˜åŒ–
     """
 
     def __init__(self, upscale_factor=6, **kwargs):
         """
-        ³õÊ¼»¯¸ß¼¶Ë«Èı´Î²åÖµÆ÷
+        åˆå§‹åŒ–é«˜çº§åŒä¸‰æ¬¡æ’å€¼å™¨
 
-        ²ÎÊı:
-            upscale_factor: ÉÏ²ÉÑù±¶Êı£¬Ä¬ÈÏ6
-            **kwargs: ¶îÍâµÄÓÅ»¯²ÎÊı
+        å‚æ•°:
+            upscale_factor: ä¸Šé‡‡æ ·å€æ•°ï¼Œé»˜è®¤6
+            **kwargs: é¢å¤–çš„ä¼˜åŒ–å‚æ•°
         """
         self.upscale_factor = upscale_factor
 
-        # ²åÖµ·½·¨
+        # æ’å€¼æ–¹æ³•
         # 'linear', 'nearest', 'cubic', 'quintic'
         self.method = kwargs.get('method', 'cubic')
 
-        # ±ß½ç´¦Àí
+        # è¾¹ç•Œå¤„ç†
         self.fill_value = kwargs.get('fill_value', 0)
         # 'constant', 'reflect', 'wrap'
         self.boundary_mode = kwargs.get('boundary_mode', 'constant')
 
-        # Íø¸ñ²ÎÊı
-        self.grid_range = kwargs.get('grid_range', [0, 1])  # [×îĞ¡Öµ, ×î´óÖµ]
+        # ç½‘æ ¼å‚æ•°
+        self.grid_range = kwargs.get('grid_range', [0, 1])  # [æœ€å°å€¼, æœ€å¤§å€¼]
         self.grid_density = kwargs.get(
             'grid_density', 'uniform')  # 'uniform', 'log', 'exp'
 
-        # ºó´¦Àí²ÎÊı
-        self.clip_range = kwargs.get('clip_range', [0, 1])  # [×îĞ¡Öµ, ×î´óÖµ]
-        self.smooth_sigma = kwargs.get('smooth_sigma', 0)  # ¸ßË¹Æ½»¬µÄsigmaÖµ
+        # åå¤„ç†å‚æ•°
+        self.clip_range = kwargs.get('clip_range', [0, 1])  # [æœ€å°å€¼, æœ€å¤§å€¼]
+        self.smooth_sigma = kwargs.get('smooth_sigma', 0)  # é«˜æ–¯å¹³æ»‘çš„sigmaå€¼
         self.savgol_window = kwargs.get(
-            'savgol_window', None)  # Savitzky-GolayÂË²¨Æ÷´°¿Ú´óĞ¡
+            'savgol_window', None)  # Savitzky-Golayæ»¤æ³¢å™¨çª—å£å¤§å°
         self.savgol_polyorder = kwargs.get(
-            'savgol_polyorder', 2)  # Savitzky-Golay¶àÏîÊ½½×Êı
+            'savgol_polyorder', 2)  # Savitzky-Golayå¤šé¡¹å¼é˜¶æ•°
 
-        # ±ßÔµÔöÇ¿
+        # è¾¹ç¼˜å¢å¼º
         self.edge_enhance = kwargs.get('edge_enhance', False)
         self.edge_strength = kwargs.get('edge_strength', 0.1)
 
-        print(f"³õÊ¼»¯¸ß¼¶Ë«Èı´Î²åÖµÆ÷£¬²ÎÊıÈçÏÂ:")
-        print(f"  ²åÖµ·½·¨: {self.method}")
-        print(f"  Ìî³äÖµ: {self.fill_value}")
-        print(f"  Íø¸ñ·¶Î§: {self.grid_range}")
-        print(f"  Æ½»¬sigma: {self.smooth_sigma}")
-        print(f"  ±ßÔµÔöÇ¿: {self.edge_enhance}")
+        print(f"åˆå§‹åŒ–é«˜çº§åŒä¸‰æ¬¡æ’å€¼å™¨ï¼Œå‚æ•°å¦‚ä¸‹:")
+        print(f"  æ’å€¼æ–¹æ³•: {self.method}")
+        print(f"  å¡«å……å€¼: {self.fill_value}")
+        print(f"  ç½‘æ ¼èŒƒå›´: {self.grid_range}")
+        print(f"  å¹³æ»‘sigma: {self.smooth_sigma}")
+        print(f"  è¾¹ç¼˜å¢å¼º: {self.edge_enhance}")
 
     def interpolate(self, lr_data):
         """
-        Ê¹ÓÃ¸ß¼¶²åÖµËã·¨ÖØ½¨¸ß·Ö±æÂÊÆøÌå·Ö²¼
+        ä½¿ç”¨é«˜çº§æ’å€¼ç®—æ³•é‡å»ºé«˜åˆ†è¾¨ç‡æ°”ä½“åˆ†å¸ƒ
 
-        ²ÎÊı:
-            lr_data: µÍ·Ö±æÂÊÊı¾İ [batch_size, 1, H, W] »ò [1, H, W]
+        å‚æ•°:
+            lr_data: ä½åˆ†è¾¨ç‡æ•°æ® [batch_size, 1, H, W] æˆ– [1, H, W]
 
-        ·µ»Ø:
-            hr_data: ¸ß·Ö±æÂÊÊı¾İ [batch_size, 1, H*upscale, W*upscale] »ò [1, H*upscale, W*upscale]
+        è¿”å›:
+            hr_data: é«˜åˆ†è¾¨ç‡æ•°æ® [batch_size, 1, H*upscale, W*upscale] æˆ– [1, H*upscale, W*upscale]
         """
         if len(lr_data.shape) == 4:
-            # Åú´¦ÀíÄ£Ê½
+            # æ‰¹å¤„ç†æ¨¡å¼
             batch_size = lr_data.shape[0]
             hr_results = []
 
@@ -95,32 +95,32 @@ class AdvancedBicubicInterpolation:
 
             return torch.stack(hr_results, dim=0)
         else:
-            # µ¥Ñù±¾Ä£Ê½
+            # å•æ ·æœ¬æ¨¡å¼
             return self._single_interpolate(lr_data)
 
     def _single_interpolate(self, lr_data):
         """
-        ¶Ôµ¥¸öÑù±¾½øĞĞ¸ß¼¶²åÖµ
+        å¯¹å•ä¸ªæ ·æœ¬è¿›è¡Œé«˜çº§æ’å€¼
 
-        ²ÎÊı:
-            lr_data: µÍ·Ö±æÂÊÊı¾İ [1, H, W]
+        å‚æ•°:
+            lr_data: ä½åˆ†è¾¨ç‡æ•°æ® [1, H, W]
 
-        ·µ»Ø:
-            hr_data: ¸ß·Ö±æÂÊÊı¾İ [1, H*upscale, W*upscale]
+        è¿”å›:
+            hr_data: é«˜åˆ†è¾¨ç‡æ•°æ® [1, H*upscale, W*upscale]
         """
-        # ×ª»»ÎªnumpyÊı×é²¢ÒÆ³ıÍ¨µÀÎ¬¶È
+        # è½¬æ¢ä¸ºnumpyæ•°ç»„å¹¶ç§»é™¤é€šé“ç»´åº¦
         lr_np = lr_data.squeeze().cpu().numpy()
 
-        # »ñÈ¡Ô­Ê¼³ß´ç
+        # è·å–åŸå§‹å°ºå¯¸
         h, w = lr_np.shape
 
-        # ¼ÆËãÄ¿±ê³ß´ç
+        # è®¡ç®—ç›®æ ‡å°ºå¯¸
         target_h = h * self.upscale_factor
         target_w = w * self.upscale_factor
 
-        # ¸ù¾İÃÜ¶ÈÉèÖÃ´´½¨Íø¸ñ
+        # æ ¹æ®å¯†åº¦è®¾ç½®åˆ›å»ºç½‘æ ¼
         if self.grid_density == 'uniform':
-            # ¾ùÔÈÍø¸ñ
+            # å‡åŒ€ç½‘æ ¼
             x_old = np.linspace(self.grid_range[0], self.grid_range[1], w)
             y_old = np.linspace(self.grid_range[0], self.grid_range[1], h)
             x_new = np.linspace(
@@ -128,7 +128,7 @@ class AdvancedBicubicInterpolation:
             y_new = np.linspace(
                 self.grid_range[0], self.grid_range[1], target_h)
         elif self.grid_density == 'log':
-            # ¶ÔÊıÍø¸ñ£¬ÊÊºÏÖ¸Êı·Ö²¼Êı¾İ
+            # å¯¹æ•°ç½‘æ ¼ï¼Œé€‚åˆæŒ‡æ•°åˆ†å¸ƒæ•°æ®
             x_old = np.logspace(
                 np.log10(self.grid_range[0] + 1e-6), np.log10(self.grid_range[1]), w)
             y_old = np.logspace(
@@ -138,7 +138,7 @@ class AdvancedBicubicInterpolation:
             y_new = np.logspace(
                 np.log10(self.grid_range[0] + 1e-6), np.log10(self.grid_range[1]), target_h)
         else:  # exponential
-            # Ö¸ÊıÍø¸ñ
+            # æŒ‡æ•°ç½‘æ ¼
             x_old = np.exp(np.linspace(
                 np.log(self.grid_range[0] + 1e-6), np.log(self.grid_range[1]), w))
             y_old = np.exp(np.linspace(
@@ -148,64 +148,64 @@ class AdvancedBicubicInterpolation:
             y_new = np.exp(np.linspace(
                 np.log(self.grid_range[0] + 1e-6), np.log(self.grid_range[1]), target_h))
 
-        # ´´½¨Íø¸ñµã
+        # åˆ›å»ºç½‘æ ¼ç‚¹
         X_old, Y_old = np.meshgrid(x_old, y_old)
         X_new, Y_new = np.meshgrid(x_new, y_new)
 
-        # Ê¹ÓÃscipy griddata½øĞĞ²åÖµ
+        # ä½¿ç”¨scipy griddataè¿›è¡Œæ’å€¼
         points = np.column_stack((X_old.flatten(), Y_old.flatten()))
         values = lr_np.flatten()
 
-        # ²åÖµ
+        # æ’å€¼
         hr_np = griddata(points, values, (X_new, Y_new),
                          method=self.method, fill_value=self.fill_value)
 
-        # ´¦ÀíNaNÖµ
+        # å¤„ç†NaNå€¼
         if np.any(np.isnan(hr_np)):
             hr_np = np.nan_to_num(hr_np, nan=self.fill_value)
 
-        # ºó´¦Àí
+        # åå¤„ç†
         hr_np = self._post_process(hr_np)
 
-        # ×ª»»»Øtensor²¢Ìí¼ÓÍ¨µÀÎ¬¶È
+        # è½¬æ¢å›tensorå¹¶æ·»åŠ é€šé“ç»´åº¦
         hr_tensor = torch.from_numpy(hr_np).float().unsqueeze(0)
 
         return hr_tensor
 
     def _post_process(self, hr_np):
         """
-        ¶Ô²åÖµ½á¹û½øĞĞºó´¦Àí
+        å¯¹æ’å€¼ç»“æœè¿›è¡Œåå¤„ç†
 
-        ²ÎÊı:
-            hr_np: ²åÖµºóµÄnumpyÊı×é
+        å‚æ•°:
+            hr_np: æ’å€¼åçš„numpyæ•°ç»„
 
-        ·µ»Ø:
-            ´¦ÀíºóµÄnumpyÊı×é
+        è¿”å›:
+            å¤„ç†åçš„numpyæ•°ç»„
         """
-        # ÖµÓòÏŞÖÆ
+        # å€¼åŸŸé™åˆ¶
         hr_np = np.clip(hr_np, self.clip_range[0], self.clip_range[1])
 
-        # ¸ßË¹Æ½»¬
+        # é«˜æ–¯å¹³æ»‘
         if self.smooth_sigma > 0:
             hr_np = gaussian_filter(hr_np, sigma=self.smooth_sigma)
 
-        # Savitzky-GolayÂË²¨£¨¶Ô1DÊı¾İ£¬Ó¦ÓÃÓÚÃ¿ĞĞ/ÁĞ£©
+        # Savitzky-Golayæ»¤æ³¢ï¼ˆå¯¹1Dæ•°æ®ï¼Œåº”ç”¨äºæ¯è¡Œ/åˆ—ï¼‰
         if self.savgol_window is not None:
             try:
-                # ¶ÔĞĞÓ¦ÓÃÂË²¨
+                # å¯¹è¡Œåº”ç”¨æ»¤æ³¢
                 for i in range(hr_np.shape[0]):
                     hr_np[i, :] = savgol_filter(
                         hr_np[i, :], self.savgol_window, self.savgol_polyorder)
-                # ¶ÔÁĞÓ¦ÓÃÂË²¨
+                # å¯¹åˆ—åº”ç”¨æ»¤æ³¢
                 for j in range(hr_np.shape[1]):
                     hr_np[:, j] = savgol_filter(
                         hr_np[:, j], self.savgol_window, self.savgol_polyorder)
             except:
-                pass  # Èç¹û´°¿Ú´óĞ¡Ì«´óÔòÌø¹ı
+                pass  # å¦‚æœçª—å£å¤§å°å¤ªå¤§åˆ™è·³è¿‡
 
-        # ±ßÔµÔöÇ¿
+        # è¾¹ç¼˜å¢å¼º
         if self.edge_enhance:
-            # Ê¹ÓÃÌİ¶È½øĞĞ¼òµ¥µÄ±ßÔµÔöÇ¿
+            # ä½¿ç”¨æ¢¯åº¦è¿›è¡Œç®€å•çš„è¾¹ç¼˜å¢å¼º
             grad_x = np.gradient(hr_np, axis=1)
             grad_y = np.gradient(hr_np, axis=0)
             edge_strength_map = np.sqrt(grad_x**2 + grad_y**2)
@@ -217,52 +217,52 @@ class AdvancedBicubicInterpolation:
 
 def test_parameter_optimization(data_path, num_samples=2):
     """
-    ²âÊÔ²»Í¬²ÎÊı×éºÏµÄÓÅ»¯Ğ§¹û
+    æµ‹è¯•ä¸åŒå‚æ•°ç»„åˆçš„ä¼˜åŒ–æ•ˆæœ
 
-    ²ÎÊı:
-        data_path: Êı¾İ¼¯Â·¾¶
-        num_samples: ²âÊÔÑù±¾ÊıÁ¿
+    å‚æ•°:
+        data_path: æ•°æ®é›†è·¯å¾„
+        num_samples: æµ‹è¯•æ ·æœ¬æ•°é‡
     """
-    print(f"\n=== ²âÊÔ²ÎÊıÓÅ»¯ ===")
+    print(f"\n=== æµ‹è¯•å‚æ•°ä¼˜åŒ– ===")
 
     try:
-        # ´´½¨Êı¾İ¼¯ºÍÊı¾İ¼ÓÔØÆ÷
+        # åˆ›å»ºæ•°æ®é›†å’Œæ•°æ®åŠ è½½å™¨
         dataset = MultiTaskDataset(data_path)
         dataloader = DataLoader(dataset, batch_size=num_samples, shuffle=False)
 
-        # »ñÈ¡Ò»¸öÅú´ÎµÄÊı¾İ
+        # è·å–ä¸€ä¸ªæ‰¹æ¬¡çš„æ•°æ®
         batch = next(iter(dataloader))
         lr = batch['lr']
         hr_true = batch['hr']
 
-        # ¶¨ÒåÒª²âÊÔµÄ²ÎÊı×éºÏ
+        # å®šä¹‰è¦æµ‹è¯•çš„å‚æ•°ç»„åˆ
         param_combinations = [
             {
-                'name': '»ù´¡Ë«Èı´Î²åÖµ',
+                'name': 'åŸºç¡€åŒä¸‰æ¬¡æ’å€¼',
                 'params': {'method': 'cubic', 'fill_value': 0}
             },
             {
-                'name': 'ÏßĞÔ²åÖµ',
+                'name': 'çº¿æ€§æ’å€¼',
                 'params': {'method': 'linear', 'fill_value': 0}
             },
             {
-                'name': '×î½üÁÚ²åÖµ',
+                'name': 'æœ€è¿‘é‚»æ’å€¼',
                 'params': {'method': 'nearest', 'fill_value': 0}
             },
             {
-                'name': 'Ë«Èı´Î²åÖµ+Æ½»¬',
+                'name': 'åŒä¸‰æ¬¡æ’å€¼+å¹³æ»‘',
                 'params': {'method': 'cubic', 'fill_value': 0, 'smooth_sigma': 0.5}
             },
             {
-                'name': 'Ë«Èı´Î²åÖµ+±ßÔµÔöÇ¿',
+                'name': 'åŒä¸‰æ¬¡æ’å€¼+è¾¹ç¼˜å¢å¼º',
                 'params': {'method': 'cubic', 'fill_value': 0, 'edge_enhance': True, 'edge_strength': 0.1}
             },
             {
-                'name': 'Ë«Èı´Î²åÖµ+Savitzky-GolayÂË²¨',
+                'name': 'åŒä¸‰æ¬¡æ’å€¼+Savitzky-Golayæ»¤æ³¢',
                 'params': {'method': 'cubic', 'fill_value': 0, 'savgol_window': 5, 'savgol_polyorder': 2}
             },
             {
-                'name': 'Ë«Èı´Î²åÖµ+¶ÔÊıÍø¸ñ',
+                'name': 'åŒä¸‰æ¬¡æ’å€¼+å¯¹æ•°ç½‘æ ¼',
                 'params': {'method': 'cubic', 'fill_value': 0, 'grid_density': 'log'}
             }
         ]
@@ -270,16 +270,16 @@ def test_parameter_optimization(data_path, num_samples=2):
         results = []
 
         for combo in param_combinations:
-            print(f"\n--- ²âÊÔ {combo['name']} ---")
+            print(f"\n--- æµ‹è¯• {combo['name']} ---")
 
-            # Ê¹ÓÃµ±Ç°²ÎÊı´´½¨²åÖµÆ÷
+            # ä½¿ç”¨å½“å‰å‚æ•°åˆ›å»ºæ’å€¼å™¨
             interpolator = AdvancedBicubicInterpolation(
                 upscale_factor=6, **combo['params'])
 
-            # Ö´ĞĞ²åÖµ
+            # æ‰§è¡Œæ’å€¼
             hr_pred = interpolator.interpolate(lr)
 
-            # ¼ÆËãÃ¿¸öÑù±¾µÄÖ¸±ê
+            # è®¡ç®—æ¯ä¸ªæ ·æœ¬çš„æŒ‡æ ‡
             sample_metrics = []
             for i in range(lr.size(0)):
                 pred_np = hr_pred[i].squeeze().numpy()
@@ -301,14 +301,14 @@ def test_parameter_optimization(data_path, num_samples=2):
                     'mse': mse
                 })
 
-            # ¼ÆËãÆ½¾ùÖ¸±ê
+            # è®¡ç®—å¹³å‡æŒ‡æ ‡
             avg_psnr = np.mean([m['psnr'] for m in sample_metrics])
             avg_ssim = np.mean([m['ssim'] for m in sample_metrics])
             avg_mse = np.mean([m['mse'] for m in sample_metrics])
 
-            print(f"Æ½¾ùPSNR: {avg_psnr:.2f} dB")
-            print(f"Æ½¾ùSSIM: {avg_ssim:.4f}")
-            print(f"Æ½¾ùMSE: {avg_mse:.6f}")
+            print(f"å¹³å‡PSNR: {avg_psnr:.2f} dB")
+            print(f"å¹³å‡SSIM: {avg_ssim:.4f}")
+            print(f"å¹³å‡MSE: {avg_mse:.6f}")
 
             results.append({
                 'name': combo['name'],
@@ -318,58 +318,58 @@ def test_parameter_optimization(data_path, num_samples=2):
                 'avg_mse': avg_mse
             })
 
-        # ÕÒµ½×î¼Ñ²ÎÊı
+        # æ‰¾åˆ°æœ€ä½³å‚æ•°
         best_psnr = max(results, key=lambda x: x['avg_psnr'])
         best_ssim = max(results, key=lambda x: x['avg_ssim'])
 
-        print(f"\n=== ÓÅ»¯½á¹û ===")
-        print(f"×î¼ÑPSNR: {best_psnr['name']} ({best_psnr['avg_psnr']:.2f} dB)")
-        print(f"×î¼ÑSSIM: {best_ssim['name']} ({best_ssim['avg_ssim']:.4f})")
+        print(f"\n=== ä¼˜åŒ–ç»“æœ ===")
+        print(f"æœ€ä½³PSNR: {best_psnr['name']} ({best_psnr['avg_psnr']:.2f} dB)")
+        print(f"æœ€ä½³SSIM: {best_ssim['name']} ({best_ssim['avg_ssim']:.4f})")
 
-        # ±£´æ½á¹û
+        # ä¿å­˜ç»“æœ
         results_df = pd.DataFrame(results)
         results_df.to_csv('parameter_optimization_results.csv', index=False)
-        print("ÏêÏ¸½á¹ûÒÑ±£´æµ½ 'parameter_optimization_results.csv'")
+        print("è¯¦ç»†ç»“æœå·²ä¿å­˜åˆ° 'parameter_optimization_results.csv'")
 
         return results
 
     except Exception as e:
-        print(f"²ÎÊıÓÅ»¯²âÊÔÊ§°Ü: {e}")
+        print(f"å‚æ•°ä¼˜åŒ–æµ‹è¯•å¤±è´¥: {e}")
         import traceback
         traceback.print_exc()
         return None
 
 
 def parse_args():
-    """½âÎöÃüÁîĞĞ²ÎÊı"""
-    parser = argparse.ArgumentParser(description='²âÊÔÊı¾İ¼¯¼ÓÔØºÍ¸ß¼¶Ë«Èı´Î²åÖµ')
+    """è§£æå‘½ä»¤è¡Œå‚æ•°"""
+    parser = argparse.ArgumentParser(description='æµ‹è¯•æ•°æ®é›†åŠ è½½å’Œé«˜çº§åŒä¸‰æ¬¡æ’å€¼')
 
     parser.add_argument('--data_path', type=str,
-                        required=True, help='Êı¾İ¼¯Â·¾¶ (.h5ÎÄ¼ş)')
-    parser.add_argument('--num_samples', type=int, default=3, help='²âÊÔÑù±¾ÊıÁ¿')
-    parser.add_argument('--no_plots', action='store_true', help='½ûÓÃ±£´æ¿ÉÊÓ»¯Í¼Æ¬')
-    parser.add_argument('--optimize', action='store_true', help='ÔËĞĞ²ÎÊıÓÅ»¯²âÊÔ')
+                        required=True, help='æ•°æ®é›†è·¯å¾„ (.h5æ–‡ä»¶)')
+    parser.add_argument('--num_samples', type=int, default=3, help='æµ‹è¯•æ ·æœ¬æ•°é‡')
+    parser.add_argument('--no_plots', action='store_true', help='ç¦ç”¨ä¿å­˜å¯è§†åŒ–å›¾ç‰‡')
+    parser.add_argument('--optimize', action='store_true', help='è¿è¡Œå‚æ•°ä¼˜åŒ–æµ‹è¯•')
 
-    # ²âÊÔÄ£Ê½ÓëÑù±¾Ñ¡Ôñ£¨¶ÔÆë evaluate_multi.py£©
+    # æµ‹è¯•æ¨¡å¼ä¸æ ·æœ¬é€‰æ‹©ï¼ˆå¯¹é½ evaluate_multi.pyï¼‰
     parser.add_argument('--test_mode', type=str, default='generalization',
                         choices=['generalization', 'test_set',
                                  'all_generalization', 'all_test_set'],
-                        help='²âÊÔÄ£Ê½£ºgeneralization£¨·º»¯²âÊÔ£©¡¢test_set£¨²âÊÔ¼¯£©¡¢all_generalization£¨·º»¯È«Á¿£©¡¢all_test_set£¨²âÊÔ¼¯È«Á¿£©')
+                        help='æµ‹è¯•æ¨¡å¼ï¼šgeneralizationï¼ˆæ³›åŒ–æµ‹è¯•ï¼‰ã€test_setï¼ˆæµ‹è¯•é›†ï¼‰ã€all_generalizationï¼ˆæ³›åŒ–å…¨é‡ï¼‰ã€all_test_setï¼ˆæµ‹è¯•é›†å…¨é‡ï¼‰')
     parser.add_argument('--sample_specs', type=str, default=None,
-                        help='·º»¯²âÊÔµÄÑù±¾¹æ¸ñ£¬ÓÃ·ÖºÅ·Ö¸ô£¬ÀıÈç£ºwind1_0,s1,50;wind2_0,s2,30')
+                        help='æ³›åŒ–æµ‹è¯•çš„æ ·æœ¬è§„æ ¼ï¼Œç”¨åˆ†å·åˆ†éš”ï¼Œä¾‹å¦‚ï¼šwind1_0,s1,50;wind2_0,s2,30')
     parser.add_argument('--test_indices', type=str, default=None,
-                        help='²âÊÔ¼¯Ë÷Òı£¬ÓÃ¶ººÅ·Ö¸ô£¬ÀıÈç£º1,2,3,4,5')
+                        help='æµ‹è¯•é›†ç´¢å¼•ï¼Œç”¨é€—å·åˆ†éš”ï¼Œä¾‹å¦‚ï¼š1,2,3,4,5')
 
-    # ¸ß¼¶²åÖµ²ÎÊı
+    # é«˜çº§æ’å€¼å‚æ•°
     parser.add_argument('--method', type=str, default='cubic',
-                        choices=['linear', 'nearest', 'cubic', 'quintic'], help='²åÖµ·½·¨')
+                        choices=['linear', 'nearest', 'cubic', 'quintic'], help='æ’å€¼æ–¹æ³•')
     parser.add_argument('--smooth_sigma', type=float,
-                        default=0, help='¸ßË¹Æ½»¬sigmaÖµ')
-    parser.add_argument('--edge_enhance', action='store_true', help='ÆôÓÃ±ßÔµÔöÇ¿')
+                        default=0, help='é«˜æ–¯å¹³æ»‘sigmaå€¼')
+    parser.add_argument('--edge_enhance', action='store_true', help='å¯ç”¨è¾¹ç¼˜å¢å¼º')
     parser.add_argument('--edge_strength', type=float,
-                        default=0.1, help='±ßÔµÔöÇ¿Ç¿¶È')
+                        default=0.1, help='è¾¹ç¼˜å¢å¼ºå¼ºåº¦')
     parser.add_argument('--savgol_window', type=int,
-                        default=None, help='Savitzky-GolayÂË²¨Æ÷´°¿Ú´óĞ¡')
+                        default=None, help='Savitzky-Golayæ»¤æ³¢å™¨çª—å£å¤§å°')
 
     args = parser.parse_args()
     return args
@@ -393,7 +393,7 @@ def get_dataset_indices(sample_specs, dataset):
         for i, data_info in enumerate(dataset.data_indices):
             if (data_info['wind_group'] == wind_name and
                 data_info['source_group'] == source_name and
-                    data_info['time_step'] <= time_steps):
+                    data_info['time_step'] == time_steps):
                 indices.append(i)
     return indices
 
@@ -516,7 +516,7 @@ def test_advanced_bicubic_interpolation(data_path, num_samples=2, save_plots=Tru
         import matplotlib.pyplot as plt
         from skimage.metrics import structural_similarity as ssim
 
-        # ÀÛ¼ÆÖ¸±êÒÔ¼ÆËãÆ½¾ùÖµ
+        # ç´¯è®¡æŒ‡æ ‡ä»¥è®¡ç®—å¹³å‡å€¼
         psnr_list = []
         ssim_list = []
         mse_list = []
@@ -535,7 +535,7 @@ def test_advanced_bicubic_interpolation(data_path, num_samples=2, save_plots=Tru
             print(f"SSIM: {ssim_val:.4f}")
             print(f"MSE: {mse:.6f}")
 
-            # ¼ÇÂ¼Ö¸±ê
+            # è®°å½•æŒ‡æ ‡
             psnr_list.append(psnr_val)
             ssim_list.append(ssim_val)
             mse_list.append(mse)
@@ -570,7 +570,7 @@ def test_advanced_bicubic_interpolation(data_path, num_samples=2, save_plots=Tru
                 print(
                     f"Visualization saved as 'advanced_bicubic_test_sample_{i+1}.png'")
 
-        # ÔÚ¶àÑù±¾ÆÀ¹À½áÊøºóÊä³öÆ½¾ùÖ¸±ê
+        # åœ¨å¤šæ ·æœ¬è¯„ä¼°ç»“æŸåè¾“å‡ºå¹³å‡æŒ‡æ ‡
         if len(psnr_list) > 0:
             avg_psnr = float(np.mean(psnr_list))
             avg_ssim = float(np.mean(ssim_list))
