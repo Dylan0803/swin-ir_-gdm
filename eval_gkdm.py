@@ -179,6 +179,7 @@ def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None, save_
                  ha='center', va='top', fontsize=14)
 
     # 第三个子图标题增加Rco值
+    # #f'(c) KDM (Rco={rco_value})'
     if rco_value is not None:
         axes[2].text(0.5, -0.08, f'(c) KDM (Rco={rco_value})', transform=axes[2].transAxes,
                      ha='center', va='top', fontsize=14)
