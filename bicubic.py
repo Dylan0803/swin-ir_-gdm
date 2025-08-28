@@ -516,6 +516,11 @@ def test_advanced_bicubic_interpolation(data_path, num_samples=2, save_plots=Tru
         import matplotlib.pyplot as plt
         from skimage.metrics import structural_similarity as ssim
 
+        # 累计指标以计算平均值
+        psnr_list = []
+        ssim_list = []
+        mse_list = []
+
         for i in range(lr.size(0)):
             print(f"\n--- Sample {i+1} evaluation ---")
             pred_np = hr_pred[i].squeeze().numpy()
@@ -529,6 +534,11 @@ def test_advanced_bicubic_interpolation(data_path, num_samples=2, save_plots=Tru
             print(f"PSNR: {psnr_val:.2f} dB")
             print(f"SSIM: {ssim_val:.4f}")
             print(f"MSE: {mse:.6f}")
+
+            # 记录指标
+            psnr_list.append(psnr_val)
+            ssim_list.append(ssim_val)
+            mse_list.append(mse)
 
             if save_plots:
                 plt.figure(figsize=(15, 5))
@@ -559,6 +569,17 @@ def test_advanced_bicubic_interpolation(data_path, num_samples=2, save_plots=Tru
                 plt.close()
                 print(
                     f"Visualization saved as 'advanced_bicubic_test_sample_{i+1}.png'")
+
+        # 在多样本评估结束后输出平均指标
+        if len(psnr_list) > 0:
+            avg_psnr = float(np.mean(psnr_list))
+            avg_ssim = float(np.mean(ssim_list))
+            avg_mse = float(np.mean(mse_list))
+
+            print("\n=== Average metrics over samples ===")
+            print(f"Average PSNR: {avg_psnr:.2f} dB")
+            print(f"Average SSIM: {avg_ssim:.4f}")
+            print(f"Average MSE: {avg_mse:.6f}")
 
         return True
 
