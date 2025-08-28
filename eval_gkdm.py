@@ -230,10 +230,23 @@ def calculate_normalized_mse(gt_mat, reconstruct_mat):
     return mse_normalized
 
 
+def mse_to_psnr(gt_mat, mse_normalized):
+    """
+    基于已对齐到 GT 动态范围后的 MSE 计算 PSNR
+    PSNR = 10 * log10( (peak^2) / MSE ), 其中 peak = max(GT) - min(GT)
+    """
+    peak = gt_mat.max() - gt_mat.min()
+    if peak <= 0:
+        return float('inf') if mse_normalized == 0 else 0.0
+    if mse_normalized <= 0:
+        return float('inf')
+    return 10.0 * np.log10((peak * peak) / mse_normalized)
+
+
 def test_rco_parameters(h5_file_path, wind_group, source_group, time_step,
                         scale_factor, mat_real_size, rco_values):
     """
-    测试不同Rco值对重建质量的影响，只返回归一化MSE
+    测试不同Rco值对重建质量的影响，只返回归一化MSE与PSNR
     """
     print("Starting Rco parameter test...")
     gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
@@ -241,9 +254,11 @@ def test_rco_parameters(h5_file_path, wind_group, source_group, time_step,
     )
     if gt_mat is None:
         print("Data loading failed")
-        return [], []
+        return [], [], []
+
     rco_list = []
     mse_normalized_list = []
+    psnr_list = []
     for rco in rco_values:
         gama = rco / 3.0
         reconstruct_mat = get_gaussian_kdm_matrix(
@@ -255,10 +270,13 @@ def test_rco_parameters(h5_file_path, wind_group, source_group, time_step,
             Gama=gama
         )
         mse_normalized = calculate_normalized_mse(gt_mat, reconstruct_mat)
+        psnr = mse_to_psnr(gt_mat, mse_normalized)
         rco_list.append(rco)
         mse_normalized_list.append(mse_normalized)
-        print(f"  Rco={rco}, Gama={gama:.4f}, MSE={mse_normalized:.6f}")
-    return rco_list, mse_normalized_list
+        psnr_list.append(psnr)
+        print(
+            f"  Rco={rco}, Gama={gama:.4f}, MSE={mse_normalized:.6f}, PSNR={psnr:.4f} dB")
+    return rco_list, mse_normalized_list, psnr_list
 
 
 def parse_args():
@@ -384,8 +402,10 @@ def evaluate_multiple_samples(h5_file_path, sample_indices, rco_values, mat_real
     print(f"Evaluating {len(sample_indices)} samples...")
 
     all_results = {}
+    all_psnr_results = {}
     for rco in rco_values:
         all_results[rco] = []
+        all_psnr_results[rco] = []
 
     # 记录每个样本的最佳Rco值（用于对比分析）
     sample_best_rcos = []
@@ -422,30 +442,44 @@ def evaluate_multiple_samples(h5_file_path, sample_indices, rco_values, mat_real
             )
 
             mse_normalized = calculate_normalized_mse(gt_mat, reconstruct_mat)
+            psnr = mse_to_psnr(gt_mat, mse_normalized)
+
             all_results[rco].append(mse_normalized)
+            all_psnr_results[rco].append(psnr)
+
             sample_mse_results[rco] = mse_normalized
             print(
-                f"  Rco={rco:4.2f}, Gama={gama:6.4f}, MSE={mse_normalized:.6f}")
+                f"  Rco={rco:4.2f}, Gama={gama:6.4f}, MSE={mse_normalized:.6f}, PSNR={psnr:.4f} dB")
 
         # 找到这个样本的最佳Rco值（用于对比分析）
         best_rco_for_sample = min(
             sample_mse_results, key=sample_mse_results.get)
         best_mse_for_sample = sample_mse_results[best_rco_for_sample]
+        best_psnr_for_sample = mse_to_psnr(gt_mat, best_mse_for_sample)
         sample_best_rcos.append(best_rco_for_sample)
         print(
-            f"  => Best Rco for this sample: {best_rco_for_sample} (MSE={best_mse_for_sample:.6f})")
+            f"  => Best Rco for this sample: {best_rco_for_sample} (MSE={best_mse_for_sample:.6f}, PSNR={best_psnr_for_sample:.4f} dB)")
 
     # 计算每个Rco的平均MSE
     avg_mse_per_rco = {}
+    avg_psnr_per_rco = {}
     print("\n--- Calculating Average MSE for Each Rco ---")
     for rco in rco_values:
         if all_results[rco]:  # 确保有数据
             avg_mse_per_rco[rco] = np.mean(all_results[rco])
+            avg_psnr_per_rco[rco] = np.mean(all_psnr_results[rco])
             print(
                 f"Rco={rco:4.2f}: Average MSE = {avg_mse_per_rco[rco]:.6f} (based on {len(all_results[rco])} samples)")
         else:
             avg_mse_per_rco[rco] = float('inf')  # 如果没有数据，设为无穷大
+            avg_psnr_per_rco[rco] = float('-inf')
             print(f"Rco={rco:4.2f}: No data available")
+
+    print(f"\n=== Average PSNR Analysis ===")
+    for rco in sorted(rco_values):
+        if avg_psnr_per_rco[rco] != float('-inf'):
+            print(
+                f"Rco={rco:4.2f}: Average PSNR = {avg_psnr_per_rco[rco]:.4f} dB")
 
     # 找到平均MSE最小的Rco值
     best_rco = min(avg_mse_per_rco, key=avg_mse_per_rco.get)
@@ -465,7 +499,7 @@ def evaluate_multiple_samples(h5_file_path, sample_indices, rco_values, mat_real
 
     print(f"\n=== Final Selection ===")
     print(
-        f"Best Rco by average MSE: {best_rco} (Average MSE={best_avg_mse:.6f})")
+        f"Best Rco by average MSE: {best_rco} (Average MSE={best_avg_mse:.6f}, Average PSNR={avg_psnr_per_rco[best_rco]:.4f} dB)")
 
     return best_rco, best_avg_mse, rco_counts, sample_best_rcos, avg_mse_per_rco
 
@@ -640,7 +674,7 @@ if __name__ == '__main__':
     else:
         # 单样本测试（原有逻辑保持不变）
         sample_info = sample_indices[0]
-        rco_list, mse_normalized_list = test_rco_parameters(
+        rco_list, mse_normalized_list, psnr_list = test_rco_parameters(
             h5_file_path,
             sample_info['wind_group'],
             sample_info['source_group'],
@@ -653,12 +687,15 @@ if __name__ == '__main__':
         if rco_list:
             best_rco, best_mse = plot_rco_vs_mse(
                 rco_list, mse_normalized_list, os.path.join(args.save_dir, 'rco_vs_mse.png'))
-
+            best_idx = rco_list.index(best_rco)
+            best_psnr = psnr_list[best_idx]
             print(f"\n=== Test Results Summary ===")
-            print(f"Best MSE Rco value: {best_rco}, MSE: {best_mse:.6f}")
+            print(
+                f"Best MSE Rco value: {best_rco}, MSE: {best_mse:.6f}, PSNR: {best_psnr:.4f} dB")
             print(f"All results:")
             for i, rco in enumerate(rco_list):
-                print(f"  Rco={rco}: MSE={mse_normalized_list[i]:.6f}")
+                print(
+                    f"  Rco={rco}: MSE={mse_normalized_list[i]:.6f}, PSNR={psnr_list[i]:.4f} dB")
 
             print(f"\nReconstructing with best parameters...")
             gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
