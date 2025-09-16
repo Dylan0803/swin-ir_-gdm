@@ -121,16 +121,20 @@ def select_indices_by_mode(args):
         indices = list(range(len(dataset)))
         use_batch = True
     else:  # test_set
+        # 统一从测试集划分中取数据，并严格使用测试集内的索引（通常范围 0..1499）
         train_dataset, valid_dataset, test_dataset = generate_train_valid_test_dataset(
             args.data_path, seed=42)
         dataset = test_dataset
         if args.test_indices is None:
             raise ValueError('test_set 模式需要 --test_indices')
+
         raw = [int(v.strip())
                for v in args.test_indices.split(',') if v.strip()]
-        indices = [v for v in raw if 0 <= v < len(dataset)]
-        if not indices:
-            raise ValueError('test_indices 为空或越界')
+        max_idx = len(dataset) - 1
+        for v in raw:
+            if not (0 <= v <= max_idx):
+                raise ValueError(f'测试集索引越界: {v}，应在 0–{max_idx}')
+        indices = raw
 
     return dataset, indices, use_batch
 
@@ -267,6 +271,25 @@ def save_img(np_img, save_path, title=None, cmap='viridis'):
     plt.close()
 
 
+def build_lr_index_from_hr(hr_np2d, scale_factor):
+    scale_factor = int(np.floor(scale_factor))
+    h, w = hr_np2d.shape
+    out_h = h // scale_factor
+    out_w = w // scale_factor
+    res_h = h - out_h * scale_factor
+    res_w = w - out_w * scale_factor
+    start_h = res_h // 2
+    start_w = res_w // 2
+    lr_index_mat = np.zeros((out_h, out_w, 2), dtype=np.int64)
+    for i in range(out_h):
+        for j in range(out_w):
+            hr_x = start_h + i * scale_factor
+            hr_y = start_w + j * scale_factor
+            lr_index_mat[i, j, 0] = hr_x
+            lr_index_mat[i, j, 1] = hr_y
+    return lr_index_mat
+
+
 def main():
     args = parse_args()
     os.makedirs(args.save_dir, exist_ok=True)
@@ -305,32 +328,31 @@ def main():
     save_img(yb_np, os.path.join(args.save_dir,
              f's{pick_idx}_Yb_bicubic.png'), 'Bicubic')
 
-    # 3) GKDM(Yk)：从文件按组取 HR/LR/坐标，再做核密度重建
-    gt_mat, lr_mat_file, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
-        filename=args.data_path,
-        wind_group=wind_group,
-        source_group=source_group,
-        time_step=time_step,
-        scale_factor=args.scale_factor
+    # 3) GKDM(Yk)：复用当前 test_dataset 的同一条样本 lr/hr
+    hr_np2d = hr.squeeze().detach().cpu().numpy()
+    lr_np2d = lr.squeeze().detach().cpu().numpy()
+    lr_index_mat = build_lr_index_from_hr(hr_np2d, args.scale_factor)
+
+    sparse_mat = np.zeros_like(hr_np2d)
+    H, W = lr_np2d.shape
+    for i in range(H):
+        for j in range(W):
+            x, y = lr_index_mat[i, j].astype(int)
+            sparse_mat[x, y] = lr_np2d[i, j]
+
+    rco = args.kdm_rco
+    gama = rco / 3.0
+    yk_np = get_gaussian_kdm_matrix(
+        measure_mat=sparse_mat,
+        mat_real_size=(args.mat_width, args.mat_height),
+        sample_index_mat=lr_index_mat,
+        sample_conc_mat=lr_np2d,
+        Rco=rco,
+        Gama=gama
     )
-    if gt_mat is None:
-        print('GKDM 数据加载失败，跳过 GKDM。')
-        yk_np = None
-    else:
-        rco = args.kdm_rco
-        gama = rco / 3.0
-        yk_np = get_gaussian_kdm_matrix(
-            measure_mat=sparse_mat,
-            mat_real_size=(args.mat_width, args.mat_height),
-            sample_index_mat=lr_index_mat,
-            sample_conc_mat=lr_mat_file,
-            Rco=rco,
-            Gama=gama
-        )
-        # 对齐到 GT 动态范围（便于可视对比）
-        yk_np = np.clip(yk_np, gt_mat.min(), gt_mat.max())
-        save_img(yk_np, os.path.join(args.save_dir,
-                 f's{pick_idx}_Yk_kdm.png'), f'KDM (Rco={rco})')
+    yk_np = np.clip(yk_np, hr_np2d.min(), hr_np2d.max())
+    save_img(yk_np, os.path.join(args.save_dir,
+             f's{pick_idx}_Yk_kdm.png'), f'KDM (Rco={rco})')
 
     # 4) SwinIR_GDM(Ys)
     model_gdm, model_multi = create_models(args)
