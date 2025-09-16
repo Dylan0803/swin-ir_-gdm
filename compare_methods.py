@@ -1,5 +1,6 @@
+# -*- coding: utf-8 -*-
 # compare_methods.py
-# Í³Ò»¶Ô±È£ºLR¡¢HR¡¢Bicubic(Yb)¡¢GKDM(Yk)¡¢SwinIR_GDM(Ys)¡¢SwinIR_Multi(Ym)
+# ç»Ÿä¸€å¯¹æ¯”ï¼šLRã€HRã€Bicubic(Yb)ã€GKDM(Yk)ã€SwinIR_GDM(Ys)ã€SwinIR_Multi(Ym)
 import os
 import argparse
 import json
@@ -11,7 +12,7 @@ import torch.nn.functional as F
 
 from argparse import Namespace
 
-# Êı¾İÓëÏÖÓĞÄ£¿é
+# æ•°æ®ä¸ç°æœ‰æ¨¡å—
 from datasets.h5_dataset import MultiTaskDataset, generate_train_valid_test_dataset
 from models.network_swinir_multi_gdm import SwinIRMulti as SwinIRMultiGDM
 from models.network_swinir_multi import SwinIRMulti
@@ -19,67 +20,67 @@ from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
 from models.network_swinir_hybrid import SwinIRHybrid
 from models.network_swinir_fuse import SwinIRFuse
 
-# ¸´ÓÃ KDM Óë Bicubic ÖĞµÄÊµÏÖ
+# å¤ç”¨ KDM ä¸ Bicubic ä¸­çš„å®ç°
 from bicubic import AdvancedBicubicInterpolation
 from eval_gkdm import load_data_from_swinir_h5, get_gaussian_kdm_matrix
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Í³Ò»¶Ô±È£ºBicubic/KDM/SwinIR(GDM & Multi)')
-    # Í¨ÓÃ
-    parser.add_argument('--data_path', type=str, required=True, help='H5 Êı¾İÂ·¾¶')
+        description='ç»Ÿä¸€å¯¹æ¯”ï¼šBicubic/KDM/SwinIR(GDM & Multi)')
+    # é€šç”¨
+    parser.add_argument('--data_path', type=str, required=True, help='H5 æ•°æ®è·¯å¾„')
     parser.add_argument('--save_dir', type=str,
-                        default='compare_outputs', help='½á¹û±£´æÄ¿Â¼')
+                        default='compare_outputs', help='ç»“æœä¿å­˜ç›®å½•')
     parser.add_argument('--device', type=str,
-                        default='cuda', help='Éè±¸£ºcuda »ò cpu')
+                        default='cuda', help='è®¾å¤‡ï¼šcuda æˆ– cpu')
     parser.add_argument('--upsampler', type=str, default='nearest+conv',
-                        choices=['nearest+conv', 'pixelshuffle'], help='ÉÏ²ÉÑù·½Ê½£¨Ä£ĞÍ£©')
+                        choices=['nearest+conv', 'pixelshuffle'], help='ä¸Šé‡‡æ ·æ–¹å¼ï¼ˆæ¨¡å‹ï¼‰')
     parser.add_argument('--config', type=str, default=None,
-                        help='¿ÉÑ¡£ºtraining_args.json£¬¸´ÓÃÄ£ĞÍ½á¹¹²ÎÊı')
+                        help='å¯é€‰ï¼štraining_args.jsonï¼Œå¤ç”¨æ¨¡å‹ç»“æ„å‚æ•°')
     parser.add_argument('--scale_factor', type=int,
-                        default=6, help='ÉÏ²ÉÑù±¶ÂÊ / ÏÂ²ÉÑù±¶ÂÊ£¬Ò»°ã=6')
+                        default=6, help='ä¸Šé‡‡æ ·å€ç‡ / ä¸‹é‡‡æ ·å€ç‡ï¼Œä¸€èˆ¬=6')
 
-    # Ñù±¾Ñ¡ÔñÂß¼­£¨Óë evaluate_multi / bicubic / eval_gkdm ¶ÔÆë£©
+    # æ ·æœ¬é€‰æ‹©é€»è¾‘ï¼ˆä¸ evaluate_multi / bicubic / eval_gkdm å¯¹é½ï¼‰
     parser.add_argument('--test_mode', type=str, default='generalization',
                         choices=['generalization', 'test_set',
                                  'all_generalization', 'all_test_set'],
-                        help='²âÊÔÄ£Ê½')
+                        help='æµ‹è¯•æ¨¡å¼')
     parser.add_argument('--sample_specs', type=str, default=None,
-                        help='·º»¯Ñù±¾¹æ¸ñ£ºwind1_0,s1,50;wind2_0,s2,30')
+                        help='æ³›åŒ–æ ·æœ¬è§„æ ¼ï¼šwind1_0,s1,50;wind2_0,s2,30')
     parser.add_argument('--test_indices', type=str, default=None,
-                        help='²âÊÔ¼¯Ë÷Òı£º1,2,3')
+                        help='æµ‹è¯•é›†ç´¢å¼•ï¼š1,2,3')
     parser.add_argument('--pick', type=int, default=0,
-                        help='µ±Æ¥Åäµ½¶à¸öÑù±¾Ê±£¬È¡µÚ¼¸¸ö£¨0-based£©£¬Ä¬ÈÏÈ¡µÚÒ»¸ö')
+                        help='å½“åŒ¹é…åˆ°å¤šä¸ªæ ·æœ¬æ—¶ï¼Œå–ç¬¬å‡ ä¸ªï¼ˆ0-basedï¼‰ï¼Œé»˜è®¤å–ç¬¬ä¸€ä¸ª')
 
-    # Á½¸öÉñ¾­ÍøÂçÈ¨ÖØ
+    # ä¸¤ä¸ªç¥ç»ç½‘ç»œæƒé‡
     parser.add_argument('--model_path_gdm', type=str,
-                        required=True, help='SwinIR_GDM È¨ÖØÂ·¾¶')
+                        required=True, help='SwinIR_GDM æƒé‡è·¯å¾„')
     parser.add_argument('--model_path_multi', type=str,
-                        required=True, help='SwinIR_Multi È¨ÖØÂ·¾¶')
-    # SwinIR_Multi µÄ±äÌåÑ¡Ôñ£¨±£³ÖÓë evaluate_multi Ò»ÖÂ£©
+                        required=True, help='SwinIR_Multi æƒé‡è·¯å¾„')
+    # SwinIR_Multi çš„å˜ä½“é€‰æ‹©ï¼ˆä¿æŒä¸ evaluate_multi ä¸€è‡´ï¼‰
     parser.add_argument('--multi_variant', type=str, default='original',
                         choices=['original', 'enhanced', 'hybrid', 'fuse'],
-                        help='SwinIR_Multi ±äÌå')
+                        help='SwinIR_Multi å˜ä½“')
 
-    # KDM ÎïÀí²ÎÊı£¨Óë eval_gkdm ¶ÔÆë£¬Rco ×Ô¶¯¸øÒ»¸ö¾­ÑéÖµ£¬Ò²¿É°´ĞèÀ©Õ¹³ÉÍø¸ñËÑË÷£©
-    parser.add_argument('--mat_width', type=float, default=9.6, help='ÎïÀí¿í¶È(m)')
+    # KDM ç‰©ç†å‚æ•°ï¼ˆä¸ eval_gkdm å¯¹é½ï¼ŒRco è‡ªåŠ¨ç»™ä¸€ä¸ªç»éªŒå€¼ï¼Œä¹Ÿå¯æŒ‰éœ€æ‰©å±•æˆç½‘æ ¼æœç´¢ï¼‰
+    parser.add_argument('--mat_width', type=float, default=9.6, help='ç‰©ç†å®½åº¦(m)')
     parser.add_argument('--mat_height', type=float,
-                        default=9.6, help='ÎïÀí¸ß¶È(m)')
+                        default=9.6, help='ç‰©ç†é«˜åº¦(m)')
     parser.add_argument('--kdm_rco', type=float,
-                        default=1.0, help='KDM µÄ Rco£¬Gama=Rco/3')
+                        default=1.0, help='KDM çš„ Rcoï¼ŒGama=Rco/3')
 
-    # Bicubic ²ÎÊı£¨Óë bicubic.py ¶ÔÆëµÄ¹Ø¼üÏî£©
+    # Bicubic å‚æ•°ï¼ˆä¸ bicubic.py å¯¹é½çš„å…³é”®é¡¹ï¼‰
     parser.add_argument('--bicubic_method', type=str, default='cubic',
-                        choices=['linear', 'nearest', 'cubic', 'quintic'], help='²åÖµ·½·¨')
+                        choices=['linear', 'nearest', 'cubic', 'quintic'], help='æ’å€¼æ–¹æ³•')
     parser.add_argument('--bicubic_smooth_sigma', type=float,
-                        default=0.0, help='¸ßË¹Æ½»¬ sigma')
+                        default=0.0, help='é«˜æ–¯å¹³æ»‘ sigma')
     parser.add_argument('--bicubic_edge_enhance',
-                        action='store_true', help='±ßÔµÔöÇ¿')
+                        action='store_true', help='è¾¹ç¼˜å¢å¼º')
     parser.add_argument('--bicubic_edge_strength',
-                        type=float, default=0.1, help='±ßÔµÔöÇ¿Ç¿¶È')
+                        type=float, default=0.1, help='è¾¹ç¼˜å¢å¼ºå¼ºåº¦')
     parser.add_argument('--bicubic_savgol_window', type=int,
-                        default=None, help='Savitzky-Golay ´°¿Ú')
+                        default=None, help='Savitzky-Golay çª—å£')
 
     return parser.parse_args()
 
@@ -91,9 +92,9 @@ def select_indices_by_mode(args):
 
     if args.test_mode == 'generalization':
         if args.sample_specs is None:
-            raise ValueError('generalization Ä£Ê½ĞèÒª --sample_specs')
+            raise ValueError('generalization æ¨¡å¼éœ€è¦ --sample_specs')
         dataset = MultiTaskDataset(args.data_path, shuffle=False)
-        # Óë evaluate_multi.get_dataset_indices Ò»ÖÂµÄ²éÕÒ£¨ÑÏ¸ñ°´ specs Ë³Ğò£¬´æÔÚ²Å¼ÓÈë£©
+        # ä¸ evaluate_multi.get_dataset_indices ä¸€è‡´çš„æŸ¥æ‰¾ï¼ˆä¸¥æ ¼æŒ‰ specs é¡ºåºï¼Œå­˜åœ¨æ‰åŠ å…¥ï¼‰
         index_map = {}
         for i in range(len(dataset)):
             try:
@@ -108,7 +109,7 @@ def select_indices_by_mode(args):
             if idx is not None:
                 indices.append(idx)
         if not indices:
-            raise ValueError('Î´ÕÒµ½Æ¥ÅäÑù±¾£¬Çë¼ì²é sample_specs')
+            raise ValueError('æœªæ‰¾åˆ°åŒ¹é…æ ·æœ¬ï¼Œè¯·æ£€æŸ¥ sample_specs')
     elif args.test_mode == 'all_generalization':
         dataset = MultiTaskDataset(args.data_path, shuffle=False)
         indices = list(range(len(dataset)))
@@ -124,18 +125,18 @@ def select_indices_by_mode(args):
             args.data_path, seed=42)
         dataset = test_dataset
         if args.test_indices is None:
-            raise ValueError('test_set Ä£Ê½ĞèÒª --test_indices')
+            raise ValueError('test_set æ¨¡å¼éœ€è¦ --test_indices')
         raw = [int(v.strip())
                for v in args.test_indices.split(',') if v.strip()]
         indices = [v for v in raw if 0 <= v < len(dataset)]
         if not indices:
-            raise ValueError('test_indices Îª¿Õ»òÔ½½ç')
+            raise ValueError('test_indices ä¸ºç©ºæˆ–è¶Šç•Œ')
 
     return dataset, indices, use_batch
 
 
 def create_models(args):
-    # ¸´ÓÃ evaluate_multi.py µÄÄ¬ÈÏ²ÎÊı
+    # å¤ç”¨ evaluate_multi.py çš„é»˜è®¤å‚æ•°
     base_params = {
         'img_size': 16,
         'in_chans': 1,
@@ -192,7 +193,7 @@ def create_models(args):
         'use_checkpoint': False,
     }
 
-    # ¿ÉÑ¡£º´Ó config ¸²¸ÇÄ£ĞÍ½á¹¹
+    # å¯é€‰ï¼šä» config è¦†ç›–æ¨¡å‹ç»“æ„
     def build_params(base, override_cfg):
         if override_cfg is None:
             return base
@@ -271,10 +272,10 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
 
-    # Ñ¡ÔñÑù±¾
+    # é€‰æ‹©æ ·æœ¬
     dataset, indices, _ = select_indices_by_mode(args)
     if not indices:
-        raise ValueError('Ã»ÓĞ¿ÉÓÃÑù±¾')
+        raise ValueError('æ²¡æœ‰å¯ç”¨æ ·æœ¬')
     pick_idx = indices[min(args.pick, len(indices)-1)]
     sample = dataset[pick_idx]
     lr = sample['lr'].unsqueeze(0).to(device)   # [1,1,H,W]
@@ -284,13 +285,13 @@ def main():
     source_group = info['source_group']
     time_step = info['time_step']
 
-    # 1) ±£´æ LR/HR Ô­Í¼
+    # 1) ä¿å­˜ LR/HR åŸå›¾
     lr_np = tensor_to_np(lr)
     hr_np = tensor_to_np(hr)
     save_img(lr_np, os.path.join(args.save_dir, f's{pick_idx}_LR.png'), 'LR')
     save_img(hr_np, os.path.join(args.save_dir, f's{pick_idx}_HR.png'), 'HR')
 
-    # 2) Bicubic(Yb)£ºÊ¹ÓÃ AdvancedBicubicInterpolation
+    # 2) Bicubic(Yb)ï¼šä½¿ç”¨ AdvancedBicubicInterpolation
     bicubic = AdvancedBicubicInterpolation(
         upscale_factor=args.scale_factor,
         method=args.bicubic_method,
@@ -304,7 +305,7 @@ def main():
     save_img(yb_np, os.path.join(args.save_dir,
              f's{pick_idx}_Yb_bicubic.png'), 'Bicubic')
 
-    # 3) GKDM(Yk)£º´ÓÎÄ¼ş°´×éÈ¡ HR/LR/×ø±ê£¬ÔÙ×öºËÃÜ¶ÈÖØ½¨
+    # 3) GKDM(Yk)ï¼šä»æ–‡ä»¶æŒ‰ç»„å– HR/LR/åæ ‡ï¼Œå†åšæ ¸å¯†åº¦é‡å»º
     gt_mat, lr_mat_file, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
         filename=args.data_path,
         wind_group=wind_group,
@@ -313,7 +314,7 @@ def main():
         scale_factor=args.scale_factor
     )
     if gt_mat is None:
-        print('GKDM Êı¾İ¼ÓÔØÊ§°Ü£¬Ìø¹ı GKDM¡£')
+        print('GKDM æ•°æ®åŠ è½½å¤±è´¥ï¼Œè·³è¿‡ GKDMã€‚')
         yk_np = None
     else:
         rco = args.kdm_rco
@@ -326,7 +327,7 @@ def main():
             Rco=rco,
             Gama=gama
         )
-        # ¶ÔÆëµ½ GT ¶¯Ì¬·¶Î§£¨±ãÓÚ¿ÉÊÓ¶Ô±È£©
+        # å¯¹é½åˆ° GT åŠ¨æ€èŒƒå›´ï¼ˆä¾¿äºå¯è§†å¯¹æ¯”ï¼‰
         yk_np = np.clip(yk_np, gt_mat.min(), gt_mat.max())
         save_img(yk_np, os.path.join(args.save_dir,
                  f's{pick_idx}_Yk_kdm.png'), f'KDM (Rco={rco})')
@@ -350,7 +351,7 @@ def main():
     save_img(ym_np, os.path.join(args.save_dir, f's{pick_idx}_Ym_swinir_multi_{args.multi_variant}.png'),
              f'SwinIR_Multi({args.multi_variant})')
 
-    # ¿ÉÑ¡£ºÊä³ö¼òµ¥Ö¸±ê
+    # å¯é€‰ï¼šè¾“å‡ºç®€å•æŒ‡æ ‡
     def psnr_np(a, b):
         mse = np.mean((a - b) ** 2)
         return 20 * np.log10(1.0 / np.sqrt(mse)) if mse > 0 else float('inf')
@@ -362,7 +363,7 @@ def main():
     print(f'  SwinIR_GDM  PSNR: {psnr_np(ys_np, hr_np):.2f} dB')
     print(f'  SwinIR_Multi PSNR: {psnr_np(ym_np, hr_np):.2f} dB')
 
-    print('Íê³É£ºÒÑÊä³ö 6 ÕÅÍ¼Æ¬£¨Èô GKDM Êı¾İ¿ÉÓÃ£©¡£')
+    print('å®Œæˆï¼šå·²è¾“å‡º 6 å¼ å›¾ç‰‡ï¼ˆè‹¥ GKDM æ•°æ®å¯ç”¨ï¼‰ã€‚')
 
 
 if __name__ == '__main__':
