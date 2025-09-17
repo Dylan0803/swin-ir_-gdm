@@ -220,26 +220,29 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
 
 
 def save_sample_data(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_dir, sample_idx, model_type):
-    """保存每个样本的数据到单独的文件"""
+    """保存每个样本的数据到指定目录（已为该样本创建的目录）"""
     import numpy as np
 
-    # 创建样本数据保存目录
-    sample_data_dir = os.path.join(save_dir, f'sample_{sample_idx}_data')
-    os.makedirs(sample_data_dir, exist_ok=True)
+    # save_dir 已是该样本的目录
+    os.makedirs(save_dir, exist_ok=True)
 
     # 转换为numpy数组并移除batch维度
     lr_np = lr.squeeze().cpu().numpy()
     hr_np = hr.squeeze().cpu().numpy()
     gdm_out_np = gdm_out.squeeze().cpu().numpy()
 
-    # 保存LR、HR、GDM输出数据
-    np.save(os.path.join(sample_data_dir, 'lr.npy'), lr_np)
-    np.save(os.path.join(sample_data_dir, 'hr.npy'), hr_np)
-    np.save(os.path.join(sample_data_dir, 'gdm_out.npy'), gdm_out_np)
+    # 保存LR、HR、GDM输出数据为CSV
+    np.savetxt(os.path.join(save_dir, 'lr.csv'),
+               lr_np, delimiter=',', fmt='%.6f')
+    np.savetxt(os.path.join(save_dir, 'hr.csv'),
+               hr_np, delimiter=',', fmt='%.6f')
+    np.savetxt(os.path.join(save_dir, 'gdm_out.csv'),
+               gdm_out_np, delimiter=',', fmt='%.6f')
 
-    # 保存差值数据
+    # 保存差值数据为CSV
     diff = hr_np - gdm_out_np
-    np.save(os.path.join(sample_data_dir, 'difference.npy'), diff)
+    np.savetxt(os.path.join(save_dir, 'difference.csv'),
+               diff, delimiter=',', fmt='%.6f')
 
     # 保存GSL相关数据（如果存在）
     if model_type != 'swinir_gdm' and gsl_out is not None and source_pos is not None:
@@ -248,11 +251,21 @@ def save_sample_data(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_dir,
         hr_max_pos_np = hr_max_pos.squeeze().cpu(
         ).numpy() if hr_max_pos is not None else None
 
-        np.save(os.path.join(sample_data_dir, 'gsl_out.npy'), gsl_out_np)
-        np.save(os.path.join(sample_data_dir, 'source_pos.npy'), source_pos_np)
-        if hr_max_pos_np is not None:
-            np.save(os.path.join(sample_data_dir,
-                    'hr_max_pos.npy'), hr_max_pos_np)
+        # 对 original 模型，全部改为 CSV 保存
+        if model_type == 'original':
+            np.savetxt(os.path.join(save_dir, 'gsl_out.csv'),
+                       gsl_out_np, delimiter=',', fmt='%.6f')
+            np.savetxt(os.path.join(save_dir, 'source_pos.csv'),
+                       source_pos_np, delimiter=',', fmt='%.6f')
+            if hr_max_pos_np is not None:
+                np.savetxt(os.path.join(save_dir, 'hr_max_pos.csv'),
+                           hr_max_pos_np, delimiter=',', fmt='%.6f')
+        else:
+            np.save(os.path.join(save_dir, 'gsl_out.npy'), gsl_out_np)
+            np.save(os.path.join(save_dir, 'source_pos.npy'), source_pos_np)
+            if hr_max_pos_np is not None:
+                np.save(os.path.join(save_dir,
+                        'hr_max_pos.npy'), hr_max_pos_np)
 
     # 保存元数据信息
     metadata = {
@@ -270,10 +283,10 @@ def save_sample_data(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_dir,
 
     # 保存元数据为JSON文件
     import json
-    with open(os.path.join(sample_data_dir, 'metadata.json'), 'w') as f:
+    with open(os.path.join(save_dir, 'metadata.json'), 'w') as f:
         json.dump(metadata, f, indent=2)
 
-    print(f"样本 {sample_idx} 的数据已保存到: {sample_data_dir}")
+    print(f"样本 {sample_idx} 的数据已保存到: {save_dir}")
 
 
 def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, model_type='original'):
@@ -287,8 +300,13 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, 
         num_samples: 要评估的样本数量
         sample_indices: 指定要评估的样本索引列表，如果为None则随机选择
     """
-    # 创建保存目录
-    os.makedirs(save_dir, exist_ok=True)
+    # 创建模型专属保存根目录
+    base_save_dir = os.path.abspath(save_dir)
+    if model_type == 'swinir_gdm':
+        model_root = os.path.join(base_save_dir, 'swinir_gdm_results')
+    else:  # original 及其他
+        model_root = os.path.join(base_save_dir, 'swinir_multi_results')
+    os.makedirs(model_root, exist_ok=True)
 
     # 加载数据集，设置shuffle=False确保数据不打乱
     dataset = MultiTaskDataset(data_path, shuffle=False)
@@ -374,17 +392,61 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, 
                     torch.sum((pred_pos - true_pos) ** 2)) / 10.0
                 total_position_error += position_error.item()
 
-            # 保存样本数据
-            save_sample_data(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos,
-                             save_dir, idx, model_type)
+            # 为该样本创建独立目录
+            sample_dir = os.path.join(model_root, f'sample_{idx}')
+            os.makedirs(sample_dir, exist_ok=True)
 
-            # 保存结果
-            save_path = os.path.join(save_dir, f'sample_{idx}.png')
+            # 保存样本数据（含npy与metadata）
+            save_sample_data(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos,
+                             sample_dir, idx, model_type)
+
+            # 保存组合图到样本目录
+            save_path = os.path.join(sample_dir, f'sample_{idx}_composite.png')
             if model_type == 'swinir_gdm':
                 visualize_results(lr, hr, gdm_out, None, None, None, save_path)
             else:
                 visualize_results(lr, hr, gdm_out, gsl_out,
                                   source_pos, hr_max_pos, save_path)
+
+            # 另外单独保存 LR / HR / GDM 三张图（无坐标轴/颜色条）
+            lr_np = lr.squeeze().detach().cpu().numpy()
+            hr_np = hr.squeeze().detach().cpu().numpy()
+            gdm_np = gdm_out.squeeze().detach().cpu().numpy()
+
+            plt.figure(figsize=(5, 5))
+            plt.imshow(lr_np, cmap='viridis')
+            plt.axis('off')
+            plt.tight_layout(pad=0)
+            plt.savefig(os.path.join(
+                sample_dir, f'sample_{idx}_LR.png'), dpi=150, bbox_inches='tight', pad_inches=0)
+            plt.close()
+
+            plt.figure(figsize=(5, 5))
+            plt.imshow(hr_np, cmap='viridis')
+            plt.axis('off')
+            plt.tight_layout(pad=0)
+            plt.savefig(os.path.join(
+                sample_dir, f'sample_{idx}_HR.png'), dpi=150, bbox_inches='tight', pad_inches=0)
+            plt.close()
+
+            plt.figure(figsize=(5, 5))
+            plt.imshow(gdm_np, cmap='viridis')
+            # 对 original 模型，在独立GDM图上标注真值与预测泄漏源位置
+            if model_type != 'swinir_gdm' and gsl_out is not None and source_pos is not None:
+                gsl_out_np = gsl_out.squeeze().detach().cpu().numpy()
+                source_pos_np = source_pos.squeeze().detach().cpu().numpy()
+                true_pos = source_pos_np * 95.0
+                pred_pos = gsl_out_np * 95.0
+                plt.plot(true_pos[0], true_pos[1], 'r*',
+                         markersize=15, label='True Source')
+                plt.plot(pred_pos[0], pred_pos[1], 'g*',
+                         markersize=15, label='Predicted Source')
+                plt.legend(loc='upper right')
+            plt.axis('off')
+            plt.tight_layout(pad=0)
+            plt.savefig(os.path.join(
+                sample_dir, f'sample_{idx}_GDM.png'), dpi=150, bbox_inches='tight', pad_inches=0)
+            plt.close()
 
         except KeyError as e:
             print(f"跳过无效数据: {e}")
@@ -851,7 +913,14 @@ def main():
     print(f"找到 {len(indices_to_evaluate)} 个要评估的样本")
     # 进行推理
     if use_batch:
-        batch_infer_model(model, dataset, args.save_dir,
+        # 计算模型专属保存根目录
+        base_save_dir = os.path.abspath(args.save_dir)
+        if args.model_type == 'swinir_gdm':
+            model_root = os.path.join(base_save_dir, 'swinir_gdm_results')
+        else:
+            model_root = os.path.join(base_save_dir, 'swinir_multi_results')
+        os.makedirs(model_root, exist_ok=True)
+        batch_infer_model(model, dataset, model_root,
                           args.model_type, device=args.device)
     else:
         infer_model(model, args.data_path, args.save_dir,
