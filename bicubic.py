@@ -349,6 +349,8 @@ def parse_args():
     parser.add_argument('--num_samples', type=int, default=3, help='测试样本数量')
     parser.add_argument('--no_plots', action='store_true', help='禁用保存可视化图片')
     parser.add_argument('--optimize', action='store_true', help='运行参数优化测试')
+    parser.add_argument('--save_dir', type=str,
+                        default='results', help='结果保存根目录')
 
     # 测试模式与样本选择（对齐 evaluate_multi.py）
     parser.add_argument('--test_mode', type=str, default='generalization',
@@ -424,6 +426,11 @@ def main():
     print("Starting advanced bicubic interpolation test...")
     print("=" * 50)
     save_plots = not args.no_plots
+
+    # Create base save directory and bicubic results directory
+    base_save_dir = os.path.abspath(args.save_dir)
+    bicubic_root_dir = os.path.join(base_save_dir, 'bicubic_results')
+    os.makedirs(bicubic_root_dir, exist_ok=True)
 
     # Build dataset and subset indices by mode
     from datasets.h5_dataset import MultiTaskDataset
@@ -541,34 +548,69 @@ def test_advanced_bicubic_interpolation(data_path, num_samples=2, save_plots=Tru
             mse_list.append(mse)
 
             if save_plots:
-                plt.figure(figsize=(15, 5))
-                plt.subplot(1, 4, 1)
-                plt.imshow(lr[i].squeeze().numpy(), cmap='viridis')
-                plt.title('Low-resolution input')
-                plt.colorbar()
+                # Prepare directories: <save_dir>/bicubic_results/sample_{i+1}
+                base_save_dir = os.path.abspath(
+                    getattr(args, 'save_dir', 'results'))
+                bicubic_root_dir = os.path.join(
+                    base_save_dir, 'bicubic_results')
+                sample_dir = os.path.join(bicubic_root_dir, f'sample_{i+1}')
+                os.makedirs(sample_dir, exist_ok=True)
 
-                plt.subplot(1, 4, 2)
-                plt.imshow(hr_true[i].squeeze().numpy(), cmap='viridis')
-                plt.title('Ground truth HR')
-                plt.colorbar()
-
-                plt.subplot(1, 4, 3)
-                plt.imshow(pred_np, cmap='viridis')
-                plt.title(f'Bicubic prediction\nPSNR: {psnr_val:.2f}')
-                plt.colorbar()
-
-                plt.subplot(1, 4, 4)
-                diff = np.abs(pred_np - true_np)
-                plt.imshow(diff, cmap='hot')
-                plt.title('Absolute difference')
-                plt.colorbar()
-
-                plt.tight_layout()
+                # Save LR image (no axes, no colorbar)
+                plt.figure(figsize=(5, 5))
+                lr_np = lr[i].squeeze().numpy()
+                plt.imshow(lr_np, cmap='viridis')
+                plt.axis('off')
+                plt.tight_layout(pad=0)
                 plt.savefig(
-                    f'advanced_bicubic_test_sample_{i+1}.png', dpi=150, bbox_inches='tight')
+                    os.path.join(sample_dir, f'advanced_bicubic_sample_{i+1}_LR.png'), dpi=150, bbox_inches='tight', pad_inches=0)
                 plt.close()
+
+                # Save HR image (no axes, no colorbar)
+                plt.figure(figsize=(5, 5))
+                hr_np = hr_true[i].squeeze().numpy()
+                plt.imshow(hr_np, cmap='viridis')
+                plt.axis('off')
+                plt.tight_layout(pad=0)
+                plt.savefig(
+                    os.path.join(sample_dir, f'advanced_bicubic_sample_{i+1}_HR.png'), dpi=150, bbox_inches='tight', pad_inches=0)
+                plt.close()
+
+                # Save Bicubic prediction image (no axes, no colorbar)
+                plt.figure(figsize=(5, 5))
+                plt.imshow(pred_np, cmap='viridis')
+                plt.axis('off')
+                plt.tight_layout(pad=0)
+                plt.savefig(
+                    os.path.join(sample_dir, f'advanced_bicubic_sample_{i+1}_Bicubic.png'), dpi=150, bbox_inches='tight', pad_inches=0)
+                plt.close()
+
+                # Save CSVs for LR, HR, Bicubic
+                np.savetxt(os.path.join(
+                    sample_dir, f'advanced_bicubic_sample_{i+1}_LR.csv'), lr_np, delimiter=',', fmt='%.6f')
+                np.savetxt(os.path.join(
+                    sample_dir, f'advanced_bicubic_sample_{i+1}_HR.csv'), hr_np, delimiter=',', fmt='%.6f')
+                np.savetxt(os.path.join(
+                    sample_dir, f'advanced_bicubic_sample_{i+1}_Bicubic.csv'), pred_np, delimiter=',', fmt='%.6f')
+
+                # Save a big composite figure (LR | HR | Bicubic), no axes/colorbars
+                fig = plt.figure(figsize=(15, 5))
+                ax1 = fig.add_subplot(1, 3, 1)
+                ax1.imshow(lr_np, cmap='viridis')
+                ax1.axis('off')
+                ax2 = fig.add_subplot(1, 3, 2)
+                ax2.imshow(hr_np, cmap='viridis')
+                ax2.axis('off')
+                ax3 = fig.add_subplot(1, 3, 3)
+                ax3.imshow(pred_np, cmap='viridis')
+                ax3.axis('off')
+                plt.tight_layout(pad=0.1)
+                plt.savefig(os.path.join(
+                    sample_dir, f'advanced_bicubic_sample_{i+1}_COMPOSITE.png'), dpi=150, bbox_inches='tight', pad_inches=0)
+                plt.close(fig)
+
                 print(
-                    f"Visualization saved as 'advanced_bicubic_test_sample_{i+1}.png'")
+                    f"Saved images to {sample_dir}")
 
         # 在多样本评估结束后输出平均指标
         if len(psnr_list) > 0:
