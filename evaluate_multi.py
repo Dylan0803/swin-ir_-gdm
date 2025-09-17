@@ -142,7 +142,7 @@ def plot_metrics(metrics, save_dir):
     plt.ylabel('Count')
 
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, 'evaluation_metrics.png'))
+    plt.savefig(os.path.join(save_dir, 'evaluation_metrics.png'), dpi=120)
     plt.close()
 
 
@@ -208,7 +208,7 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
     plt.subplots_adjust(bottom=0.12)  # 为底部标题留出更多空间
 
     # 保存图像
-    plt.savefig(save_path, bbox_inches='tight', dpi=300)
+    plt.savefig(save_path, bbox_inches='tight', dpi=120)
     plt.close()
 
     # 只在pred_pos和true_pos都已定义时返回距离
@@ -733,6 +733,7 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
     total_ssim = 0
     valid_samples = 0
     visualized = 0  # 可视化计数器
+    total_processed = 0  # 全局样本计数器，用于命名 sample_{idx}
 
     with torch.no_grad():
         for i, batch in enumerate(tqdm(dataloader, desc="Batch Evaluating")):
@@ -776,26 +777,90 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
                     torch.sum((pred_pos - true_pos) ** 2, dim=1)) / 10.0
                 total_position_error += position_error.sum().item()
 
-            # 只可视化前max_visualize个样本
+            # 为该批次中的每个样本创建独立目录并保存数据与图片（不受max_visualize限制）
+            batch_size_now = lr.size(0)
+            for j in range(batch_size_now):
+                sample_idx_global = total_processed
+                sample_dir = os.path.join(
+                    save_dir, f'sample_{sample_idx_global}')
+                os.makedirs(sample_dir, exist_ok=True)
+
+                # 保存样本数据（CSV/NPY依据模型类型的既有逻辑）
+                save_sample_data(
+                    lr[j:j+1], hr[j:j+1], gdm_out[j:j+1],
+                    (gsl_out[j:j+1] if (gsl_out is not None and model_type !=
+                     'swinir_gdm') else None),
+                    (source_pos[j:j+1] if (source_pos is not None and model_type !=
+                     'swinir_gdm') else None),
+                    None,
+                    sample_dir, sample_idx_global, model_type
+                )
+
+                # 保存组合图
+                composite_path = os.path.join(
+                    sample_dir, f'sample_{sample_idx_global}_composite.png')
+                if model_type == 'swinir_gdm':
+                    visualize_results(
+                        lr[j:j+1], hr[j:j+1], gdm_out[j:j+1], None, None, None, composite_path)
+                else:
+                    visualize_results(
+                        lr[j:j+1], hr[j:j+1], gdm_out[j:j+1],
+                        (gsl_out[j:j+1] if gsl_out is not None else None),
+                        (source_pos[j:j+1]
+                         if source_pos is not None else None),
+                        None, composite_path
+                    )
+
+                # 单独保存 LR / HR / GDM 图
+                lr_np = lr[j].squeeze().detach().cpu().numpy()
+                hr_np = hr[j].squeeze().detach().cpu().numpy()
+                gdm_np = gdm_out[j].squeeze().detach().cpu().numpy()
+
+                plt.figure(figsize=(5, 5))
+                plt.imshow(lr_np, cmap='viridis')
+                plt.axis('off')
+                plt.tight_layout(pad=0)
+                plt.savefig(os.path.join(
+                    sample_dir, f'sample_{sample_idx_global}_LR.png'), dpi=150, bbox_inches='tight', pad_inches=0)
+                plt.close()
+
+                plt.figure(figsize=(5, 5))
+                plt.imshow(hr_np, cmap='viridis')
+                plt.axis('off')
+                plt.tight_layout(pad=0)
+                plt.savefig(os.path.join(
+                    sample_dir, f'sample_{sample_idx_global}_HR.png'), dpi=150, bbox_inches='tight', pad_inches=0)
+                plt.close()
+
+                plt.figure(figsize=(5, 5))
+                plt.imshow(gdm_np, cmap='viridis')
+                # original 模型在独立GDM图上标注泄漏源真值/预测
+                if model_type != 'swinir_gdm' and gsl_out is not None and source_pos is not None:
+                    gsl_out_np = gsl_out[j].squeeze().detach().cpu().numpy()
+                    source_pos_np = source_pos[j].squeeze(
+                    ).detach().cpu().numpy()
+                    true_pos = source_pos_np * 95.0
+                    pred_pos = gsl_out_np * 95.0
+                    plt.plot(true_pos[0], true_pos[1], 'r*',
+                             markersize=15, label='True Source')
+                    plt.plot(pred_pos[0], pred_pos[1], 'g*',
+                             markersize=15, label='Predicted Source')
+                    plt.legend(loc='upper right')
+                plt.axis('off')
+                plt.tight_layout(pad=0)
+                plt.savefig(os.path.join(
+                    sample_dir, f'sample_{sample_idx_global}_GDM.png'), dpi=150, bbox_inches='tight', pad_inches=0)
+                plt.close()
+
+                total_processed += 1
+
+            # 另外，仅保留少量批次级快速浏览图（不影响完整保存）
             if visualized < max_visualize:
-                batch_size_now = lr.size(0)
-                for j in range(batch_size_now):
-                    if visualized >= max_visualize:
-                        break
-                    save_path = os.path.join(
-                        save_dir, f'batch_{i}_sample_{j}.png')
-                    if model_type == 'swinir_gdm':
-                        visualize_results(
-                            lr[j:j+1], hr[j:j+1], gdm_out[j:j+1], None, None, None, save_path)
-                    else:
-                        visualize_results(
-                            lr[j:j+1], hr[j:j+1], gdm_out[j:j+1],
-                            gsl_out[j:j+1] if gsl_out is not None else None,
-                            source_pos[j:j +
-                                       1] if source_pos is not None else None,
-                            None, save_path
-                        )
-                    visualized += 1
+                preview_path = os.path.join(
+                    save_dir, f'batch_{i}_sample_preview.png')
+                visualize_results(lr[0:1], hr[0:1], gdm_out[0:1], None if model_type == 'swinir_gdm' else (
+                    gsl_out[0:1] if gsl_out is not None else None), None, None, preview_path)
+                visualized += 1
 
     # 输出平均指标
     if valid_samples > 0:
