@@ -625,35 +625,60 @@ def plot_average_mse_vs_rco(rco_values, avg_mse_per_rco, best_rco, save_path=Non
     return best_rco, best_mse
 
 
-if __name__ == '__main__':
+def reconstruct_and_save_for_samples(h5_file_path, sample_indices, scale_factor, mat_real_size, rco, out_root):
+    os.makedirs(out_root, exist_ok=True)
+    for i, sample_info in enumerate(sample_indices):
+        gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
+            h5_file_path,
+            sample_info['wind_group'],
+            sample_info['source_group'],
+            sample_info['time_step'],
+            scale_factor
+        )
+        if gt_mat is None:
+            print(f"[Skip] Failed to load sample {i}: {sample_info}")
+            continue
+
+        # 每个样本单独的子目录（含更可读的命名）
+        slug = f"{sample_info['wind_group']}_{sample_info['source_group']}_{sample_info['time_step']}"
+        sample_dir = os.path.join(out_root, f"sample_{i}_{slug}")
+        os.makedirs(sample_dir, exist_ok=True)
+
+        # KDM 重建
+        gama = rco / 3.0
+        reconstruct_mat = get_gaussian_kdm_matrix(
+            measure_mat=sparse_mat,
+            mat_real_size=mat_real_size,
+            sample_index_mat=lr_index_mat,
+            sample_conc_mat=lr_mat,
+            Rco=rco,
+            Gama=gama
+        )
+
+        # 组合图保存到该样本目录；gkdm_flow 内部会基于 save_path 基名生成对应 CSV
+        save_path = os.path.join(sample_dir, "gkdm_result.png")
+        gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat,
+                  rco_value=rco, save_path=save_path)
+
+        print(f"[OK] Saved: {sample_dir}")
+
+
+def main():
     args = parse_args()
 
-    # 创建与 eval_gkdm.py 同路径的 results/gkdm_results 目录
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    results_dir = os.path.join(script_dir, 'results', 'gkdm_results')
-    os.makedirs(results_dir, exist_ok=True)
+    gkdm_results_dir = os.path.join(script_dir, 'results', 'gkdm_results')
+    os.makedirs(gkdm_results_dir, exist_ok=True)
 
-    # 创建保存目录
-    os.makedirs(args.save_dir, exist_ok=True)
-
-    # 设置参数
     h5_file_path = args.data_path
     mat_real_size = (args.mat_width, args.mat_height)
     scale_factor = args.scale_factor
 
-    # 生成Rco值范围
+    # 生成 Rco 列表
     rco_values = [round(x, 2) for x in np.arange(
         args.rco_start, args.rco_end + args.rco_step, args.rco_step)]
 
-    print("--- Starting GKDM Parameter Test ---")
-    print(f"Data file path: {h5_file_path}")
-    print(f"Save directory: {args.save_dir}")
-    print(f"Test mode: {args.test_mode}")
-    print(
-        f"Rco range: {args.rco_start} to {args.rco_end}, step: {args.rco_step}")
-    print(f"Testing Rco values: {rco_values}")
-
-    # 根据测试模式选择样本
+    # 按 test_mode 获取 sample_indices（保持你原有的逻辑）
     sample_indices = []
     if args.test_mode == 'generalization':
         if args.sample_specs:
@@ -698,77 +723,30 @@ if __name__ == '__main__':
         print("No samples to evaluate!")
         exit(1)
 
-    # 评估多个样本
-    if len(sample_indices) > 1:
-        best_rco, avg_mse, rco_counts, sample_best_rcos, avg_mse_per_rco = evaluate_multiple_samples(
-            h5_file_path, sample_indices, rco_values, mat_real_size, scale_factor, args.save_dir)
-
-        # 绘制平均MSE vs Rco图
-        plot_average_mse_vs_rco(rco_values, avg_mse_per_rco, best_rco, os.path.join(
-            args.save_dir, 'average_mse_vs_rco.png'))
-
-        print(f"\n=== Test Results Summary ===")
+    # 分支1：固定 Rco 且多样本 → 逐个样本输出
+    if len(rco_values) == 1 and len(sample_indices) > 1:
+        reconstruct_and_save_for_samples(
+            h5_file_path=h5_file_path,
+            sample_indices=sample_indices,
+            scale_factor=scale_factor,
+            mat_real_size=mat_real_size,
+            rco=rco_values[0],
+            out_root=gkdm_results_dir
+        )
         print(
-            f"Best Rco by average MSE: {best_rco}, Average MSE: {avg_mse:.6f}")
-
-        # 使用最佳参数进行最终重建
-        print(f"\nReconstructing with best parameters...")
-        sample_info = sample_indices[0]  # 使用第一个样本进行可视化
-        gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
-            h5_file_path, sample_info['wind_group'], sample_info['source_group'], sample_info['time_step'], scale_factor
-        )
-
-        if gt_mat is not None:
-            # 手动指定Rco
-            custom_rco = best_rco  # 用于测试Rco值
-            reconstruct_mat = get_gaussian_kdm_matrix(
-                measure_mat=sparse_mat,
-                mat_real_size=mat_real_size,
-                sample_index_mat=lr_index_mat,
-                sample_conc_mat=lr_mat,
-                Rco=custom_rco,
-                Gama=custom_rco/3.0
-            )
-            gkdm_flow(gt_mat, lr_mat, sparse_mat,
-                      reconstruct_mat, rco_value=custom_rco)
+            f"Done: saved {len(sample_indices)} samples to {gkdm_results_dir}")
     else:
-        # 单样本测试（原有逻辑保持不变）
-        sample_info = sample_indices[0]
-        rco_list, mse_normalized_list, psnr_list = test_rco_parameters(
-            h5_file_path,
-            sample_info['wind_group'],
-            sample_info['source_group'],
-            sample_info['time_step'],
-            scale_factor,
-            mat_real_size,
-            rco_values
-        )
-
-        if rco_list:
-            # 确保保存到 gkdm_results 目录
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            gkdm_results_dir = os.path.join(
-                script_dir, 'results', 'gkdm_results')
-            os.makedirs(gkdm_results_dir, exist_ok=True)
-
-            best_rco, best_mse = plot_rco_vs_mse(
-                rco_list, mse_normalized_list, os.path.join(gkdm_results_dir, 'rco_vs_mse.png'))
-
-            best_idx = rco_list.index(best_rco)
-            best_psnr = psnr_list[best_idx]
-            print(f"\n=== Test Results Summary ===")
-            print(
-                f"Best MSE Rco value: {best_rco}, MSE: {best_mse:.6f}, PSNR: {best_psnr:.4f} dB")
-            print(f"All results:")
-            for i, rco in enumerate(rco_list):
-                print(
-                    f"  Rco={rco}: MSE={mse_normalized_list[i]:.6f}, PSNR={psnr_list[i]:.4f} dB")
-
-            print(f"\nReconstructing with best parameters...")
+        # 分支2：保持你原有的单样本/多样本扫描与平均流程
+        if len(sample_indices) > 1:
+            best_rco, avg_mse, rco_counts, sample_best_rcos, avg_mse_per_rco = evaluate_multiple_samples(
+                h5_file_path, sample_indices, rco_values, mat_real_size, scale_factor, args.save_dir)
+            plot_average_mse_vs_rco(rco_values, avg_mse_per_rco, best_rco, os.path.join(
+                gkdm_results_dir, 'average_mse_vs_rco.png'))
+            # 用 best_rco 做一次可视化（可选）
+            sample_info = sample_indices[0]
             gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
                 h5_file_path, sample_info['wind_group'], sample_info['source_group'], sample_info['time_step'], scale_factor
             )
-
             if gt_mat is not None:
                 reconstruct_mat = get_gaussian_kdm_matrix(
                     measure_mat=sparse_mat,
@@ -778,7 +756,33 @@ if __name__ == '__main__':
                     Rco=best_rco,
                     Gama=best_rco/3.0
                 )
-                gkdm_flow(gt_mat, lr_mat, sparse_mat,
-                          reconstruct_mat, rco_value=best_rco)
+                gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=best_rco,
+                          save_path=os.path.join(gkdm_results_dir, 'gkdm_result.png'))
         else:
-            print("Parameter test failed")
+            # 单样本参数扫描（保持原逻辑）
+            sample_info = sample_indices[0]
+            rco_list, mse_normalized_list, psnr_list = test_rco_parameters(
+                h5_file_path, sample_info['wind_group'], sample_info['source_group'], sample_info['time_step'],
+                scale_factor, mat_real_size, rco_values
+            )
+            if rco_list:
+                best_rco, best_mse = plot_rco_vs_mse(
+                    rco_list, mse_normalized_list, os.path.join(gkdm_results_dir, 'rco_vs_mse.png'))
+                gt_mat, lr_mat, sparse_mat, lr_index_mat = load_data_from_swinir_h5(
+                    h5_file_path, sample_info['wind_group'], sample_info['source_group'], sample_info['time_step'], scale_factor
+                )
+                if gt_mat is not None:
+                    reconstruct_mat = get_gaussian_kdm_matrix(
+                        measure_mat=sparse_mat,
+                        mat_real_size=mat_real_size,
+                        sample_index_mat=lr_index_mat,
+                        sample_conc_mat=lr_mat,
+                        Rco=best_rco,
+                        Gama=best_rco/3.0
+                    )
+                    gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=best_rco,
+                              save_path=os.path.join(gkdm_results_dir, 'gkdm_result.png'))
+
+
+if __name__ == '__main__':
+    main()
