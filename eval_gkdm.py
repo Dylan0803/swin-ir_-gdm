@@ -153,11 +153,18 @@ def get_gaussian_kdm_matrix(measure_mat,
     return reconstruct_mat
 
 
-def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None, save_path='gkdm_result.png'):
+def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None, save_path=None):
     """
     可视化KDM的输入和输出（去除sparse_mat_corrected，只保留3个子图）
     不在每个子图右侧显示图例（颜色条）
     """
+    if save_path is None:
+        # 默认保存到与脚本同路径的 results/gkdm_results 目录
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        results_dir = os.path.join(script_dir, 'results', 'gkdm_results')
+        os.makedirs(results_dir, exist_ok=True)
+        save_path = os.path.join(results_dir, 'gkdm_result.png')
+
     # 检查数据范围
     print(f"Visualization data ranges:")
     print(f"  GT: [{gt_mat.min():.6f}, {gt_mat.max():.6f}]")
@@ -166,6 +173,8 @@ def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None, save_
         f"  Reconstruct: [{reconstruct_mat.min():.6f}, {reconstruct_mat.max():.6f}]")
     reconstruct_mat_clipped = np.clip(
         reconstruct_mat, gt_mat.min(), gt_mat.max())
+
+    # 创建组合图
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     # 真实值
@@ -179,7 +188,6 @@ def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None, save_
                  ha='center', va='top', fontsize=14)
 
     # 第三个子图标题增加Rco值
-    # #f'(c) KDM (Rco={rco_value})'
     if rco_value is not None:
         axes[2].text(0.5, -0.08, f'(c) KDM (Rco={rco_value})', transform=axes[2].transAxes,
                      ha='center', va='top', fontsize=14)
@@ -197,10 +205,42 @@ def gkdm_flow(gt_mat, lr_mat, sparse_mat, reconstruct_mat, rco_value=None, save_
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f"Image saved as {save_path}")
 
+    # 单独保存三个子图（无图注）
+    save_dir = os.path.dirname(
+        save_path) if os.path.dirname(save_path) else '.'
+
+    # 保存 Ground Truth
+    plt.figure(figsize=(5, 5))
+    plt.imshow(gt_mat, cmap='viridis')
+    plt.axis('off')
+    plt.tight_layout()
+    gt_save_path = os.path.join(save_dir, 'gkdm_gt.png')
+    plt.savefig(gt_save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Ground Truth saved as {gt_save_path}")
+
+    # 保存 LR
+    plt.figure(figsize=(5, 5))
+    plt.imshow(lr_mat, cmap='viridis')
+    plt.axis('off')
+    plt.tight_layout()
+    lr_save_path = os.path.join(save_dir, 'gkdm_lr.png')
+    plt.savefig(lr_save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"LR saved as {lr_save_path}")
+
+    # 保存 KDM 重建结果
+    plt.figure(figsize=(5, 5))
+    plt.imshow(reconstruct_mat_clipped, cmap='viridis')
+    plt.axis('off')
+    plt.tight_layout()
+    kdm_save_path = os.path.join(save_dir, 'gkdm_reconstruct.png')
+    plt.savefig(kdm_save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"KDM Reconstruct saved as {kdm_save_path}")
+
     # 保存用于后期处理的数据（CSV），便于在 Origin 等软件中进一步调整
     try:
-        save_dir = os.path.dirname(
-            save_path) if os.path.dirname(save_path) else '.'
         base_name = os.path.splitext(os.path.basename(save_path))[0]
         gt_csv_path = os.path.join(save_dir, f"{base_name}_GT.csv")
         lr_csv_path = os.path.join(save_dir, f"{base_name}_LR.csv")
@@ -505,8 +545,15 @@ def evaluate_multiple_samples(h5_file_path, sample_indices, rco_values, mat_real
     return best_rco, best_avg_mse, rco_counts, sample_best_rcos, avg_mse_per_rco
 
 
-def plot_rco_vs_mse(rco_list, mse_normalized_list, save_path='rco_vs_mse.png'):
+def plot_rco_vs_mse(rco_list, mse_normalized_list, save_path=None):
     """绘制Rco值与归一化MSE的关系图"""
+    if save_path is None:
+        # 默认保存到与脚本同路径的 results/gkdm_results 目录
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        results_dir = os.path.join(script_dir, 'results', 'gkdm_results')
+        os.makedirs(results_dir, exist_ok=True)
+        save_path = os.path.join(results_dir, 'rco_vs_mse.png')
+
     plt.figure(figsize=(10, 6))
     plt.plot(rco_list, mse_normalized_list, 'bo-',
              linewidth=2, markersize=8, label='MSE')
@@ -542,8 +589,15 @@ def plot_rco_vs_mse(rco_list, mse_normalized_list, save_path='rco_vs_mse.png'):
     return best_rco, best_mse
 
 
-def plot_average_mse_vs_rco(rco_values, avg_mse_per_rco, best_rco, save_path='average_mse_vs_rco.png'):
+def plot_average_mse_vs_rco(rco_values, avg_mse_per_rco, best_rco, save_path=None):
     """绘制平均MSE vs Rco的关系图"""
+    if save_path is None:
+        # 默认保存到与脚本同路径的 results/gkdm_results 目录
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        results_dir = os.path.join(script_dir, 'results', 'gkdm_results')
+        os.makedirs(results_dir, exist_ok=True)
+        save_path = os.path.join(results_dir, 'average_mse_vs_rco.png')
+
     plt.figure(figsize=(10, 6))
 
     # 准备数据
@@ -573,6 +627,11 @@ def plot_average_mse_vs_rco(rco_values, avg_mse_per_rco, best_rco, save_path='av
 
 if __name__ == '__main__':
     args = parse_args()
+
+    # 创建与 eval_gkdm.py 同路径的 results/gkdm_results 目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    results_dir = os.path.join(script_dir, 'results', 'gkdm_results')
+    os.makedirs(results_dir, exist_ok=True)
 
     # 创建保存目录
     os.makedirs(args.save_dir, exist_ok=True)
@@ -686,8 +745,15 @@ if __name__ == '__main__':
         )
 
         if rco_list:
+            # 确保保存到 gkdm_results 目录
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            gkdm_results_dir = os.path.join(
+                script_dir, 'results', 'gkdm_results')
+            os.makedirs(gkdm_results_dir, exist_ok=True)
+
             best_rco, best_mse = plot_rco_vs_mse(
-                rco_list, mse_normalized_list, os.path.join(args.save_dir, 'rco_vs_mse.png'))
+                rco_list, mse_normalized_list, os.path.join(gkdm_results_dir, 'rco_vs_mse.png'))
+
             best_idx = rco_list.index(best_rco)
             best_psnr = psnr_list[best_idx]
             print(f"\n=== Test Results Summary ===")
