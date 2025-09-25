@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from models.network_swinir_multi_gdm import SwinIRMulti as SwinIRMultiGDM
 import torch.nn.functional as F
 import shutil
