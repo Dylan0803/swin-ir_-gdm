@@ -11,7 +11,7 @@ from models.network_swinir_multi_enhanced import SwinIRMultiEnhanced
 from models.network_swinir_multi import SwinIRMulti
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from torch.optim.lr_scheduler import MultiStepLR
+from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 import torch.optim as optim
 import torch.nn as nn
@@ -23,7 +23,7 @@ import datetime
 import argparse
 import os
 import sys
-# Ìí¼ÓÏîÄ¿¸ùÄ¿Â¼µ½PythonÂ·¾¶
+# æ·»åŠ é¡¹ç›®æ ¹ç›®å½•åˆ°Pythonè·¯å¾„
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
@@ -32,21 +32,21 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description='Train SwinIR Multi-task Model')
 
-    # Ä£ĞÍÑ¡Ôñ²ÎÊı
+    # æ¨¡å‹é€‰æ‹©å‚æ•°
     parser.add_argument('--model_type', type=str, default='original',
                         choices=['original', 'enhanced', 'fuse', 'swinir_gdm'],
-                        help='Ñ¡ÔñÄ£ĞÍÀàĞÍ: original, enhanced, fuse, swinir_gdm')
+                        help='é€‰æ‹©æ¨¡å‹ç±»å‹: original, enhanced, fuse, swinir_gdm')
 
-    # ĞÂÔö£ºÉÏ²ÉÑùÆ÷Ñ¡Ôñ²ÎÊı
+    # æ–°å¢ï¼šä¸Šé‡‡æ ·å™¨é€‰æ‹©å‚æ•°
     parser.add_argument('--upsampler', type=str, default='nearest+conv',
                         choices=['nearest+conv', 'pixelshuffle'],
-                        help='Ñ¡ÔñÉÏ²ÉÑùÆ÷ÀàĞÍ: nearest+conv »ò pixelshuffle')
+                        help='é€‰æ‹©ä¸Šé‡‡æ ·å™¨ç±»å‹: nearest+conv æˆ– pixelshuffle')
 
-    # ĞÂÔö£º½ö¶Ô original(SwinIRMulti) ÓĞĞ§µÄ RSTB ×éÊı²ÎÊı
+    # æ–°å¢ï¼šä»…å¯¹ original(SwinIRMulti) æœ‰æ•ˆçš„ RSTB ç»„æ•°å‚æ•°
     parser.add_argument('--multi_rstb', type=int, default=None,
-                        help='½ö¶Ô original(SwinIRMulti) ÉúĞ§£ºÉèÖÃ RSTB ×éÊı£¨Èç 2/4/6/8/...£©')
+                        help='ä»…å¯¹ original(SwinIRMulti) ç”Ÿæ•ˆï¼šè®¾ç½® RSTB ç»„æ•°ï¼ˆå¦‚ 2/4/6/8/...ï¼‰')
 
-    # Êı¾İ²ÎÊı
+    # æ•°æ®å‚æ•°
     parser.add_argument('--data_path', type=str, required=True,
                         help='path to the dataset')
     parser.add_argument('--save_dir', type=str, required=True,
@@ -56,7 +56,7 @@ def parse_args():
     parser.add_argument('--num_epochs', type=int, default=50,
                         help='number of epochs')
 
-    # ÑµÁ·²ÎÊı
+    # è®­ç»ƒå‚æ•°
     parser.add_argument('--lr', type=float, default=0.0002,
                         help='learning rate')
     parser.add_argument('--gdm_weight', type=float, default=1.0,
@@ -64,9 +64,9 @@ def parse_args():
     parser.add_argument('--gsl_weight', type=float, default=0.5,
                         help='weight for GSL (source localization) task')
 
-    # Êı¾İ¼¯»®·Ö²ÎÊı
+    # æ•°æ®é›†åˆ’åˆ†å‚æ•°
     parser.add_argument('--use_test_set', action='store_true',
-                        help='ÊÇ·ñÊ¹ÓÃ²âÊÔ¼¯»®·Ö£¨ÑµÁ·¼¯80%£¬ÑéÖ¤¼¯10%£¬²âÊÔ¼¯10%£©')
+                        help='æ˜¯å¦ä½¿ç”¨æµ‹è¯•é›†åˆ’åˆ†ï¼ˆè®­ç»ƒé›†80%ï¼ŒéªŒè¯é›†10%ï¼Œæµ‹è¯•é›†10%ï¼‰')
 
     args = parser.parse_args()
     return args
@@ -96,17 +96,17 @@ def calculate_position_error(pred_pos, gt_pos):
 
 
 def create_model(args):
-    """¸ù¾İ²ÎÊı´´½¨Ä£ĞÍ"""
-    # »ù´¡Ä£ĞÍ²ÎÊı
+    """æ ¹æ®å‚æ•°åˆ›å»ºæ¨¡å‹"""
+    # åŸºç¡€æ¨¡å‹å‚æ•°
     base_params = {
-        'img_size': 16,  # LRÍ¼Ïñ´óĞ¡
-        'in_chans': 1,   # ÊäÈëÍ¨µÀÊı
-        'upscale': 6,    # ÉÏ²ÉÑù±¶Êı
-        'img_range': 1.,  # Í¼Ïñ·¶Î§
-        'upsampler': args.upsampler  # ÕâÀï¸ÄÎªÓÃÃüÁîĞĞ²ÎÊı
+        'img_size': 16,  # LRå›¾åƒå¤§å°
+        'in_chans': 1,   # è¾“å…¥é€šé“æ•°
+        'upscale': 6,    # ä¸Šé‡‡æ ·å€ç‡
+        'img_range': 1.,  # å›¾åƒèŒƒå›´
+        'upsampler': args.upsampler  # å¯é€‰æ‹©çš„ä¸Šé‡‡æ ·å™¨
     }
 
-    # Ô­Ê¼Ä£ĞÍ²ÎÊı£¨¿É°´ multi_rstb µ÷Õû RSTB ×éÊı£©
+    # åŸå§‹æ¨¡å‹å‚æ•°ï¼šå¯æŒ‰ multi_rstb è®¾ç½® RSTB ç»„æ•°
     default_depth_per_group = 6
     default_heads_per_group = 6
     default_groups = 4
@@ -116,21 +116,21 @@ def create_model(args):
     num_heads = [default_heads_per_group for _ in range(groups)]
     original_params = {
         **base_params,
-        'window_size': 8,  # Swin Transformer´°¿Ú´óĞ¡
-        'depths': depths,  # RSTB ×éÊıÓÉÁĞ±í³¤¶È¾ö¶¨
-        'embed_dim': 60,  # Ç¶ÈëÎ¬¶È
-        'num_heads': num_heads,  # ×¢ÒâÁ¦Í·ÊıÁĞ±íĞèÓë depths Í¬³¤¶È
-        'mlp_ratio': 2.,  # MLP±ÈÂÊ,
+        'window_size': 8,  # Swin Transformerçª—å£å¤§å°
+        'depths': depths,  # RSTB ç»„æ·±åº¦åˆ—è¡¨
+        'embed_dim': 60,  # åµŒå…¥ç»´åº¦
+        'num_heads': num_heads,  # æ³¨æ„åŠ›å¤´æ•°åˆ—è¡¨ï¼Œä¸ depths å¯¹é½
+        'mlp_ratio': 2.,  # MLP æ¯”ä¾‹
     }
 
-    # ÔöÇ¿°æÄ£ĞÍ²ÎÊı
+    # å¢å¼ºæ¨¡å‹å‚æ•°
     enhanced_params = {
         **base_params,
-        'window_size': 8,  # Swin Transformer´°¿Ú´óĞ¡
-        'depths': [6, 6, 6, 6],  # Swin TransformerÉî¶È
-        'embed_dim': 60,  # Ç¶ÈëÎ¬¶È
-        'num_heads': [6, 6, 6, 6],  # ×¢ÒâÁ¦Í·Êı
-        'mlp_ratio': 2.,  # MLP±ÈÂÊ
+        'window_size': 8,
+        'depths': [6, 6, 6, 6],
+        'embed_dim': 60,
+        'num_heads': [6, 6, 6, 6],
+        'mlp_ratio': 2.,
         'qkv_bias': True,
         'qk_scale': None,
         'drop_rate': 0.,
@@ -143,14 +143,14 @@ def create_model(args):
         'resi_connection': '1conv'
     }
 
-    # »ìºÏ¼Ü¹¹Ä£ĞÍ²ÎÊı£¨±£ÁôÓÃÓÚfuse£©
+    # èåˆæ¶æ„æ¨¡å‹å‚æ•°ï¼ˆSwinIRFuseï¼‰
     fuse_params = {
         **base_params,
-        'window_size': 8,  # Swin Transformer´°¿Ú´óĞ¡
-        'depths': [6, 6, 6, 6],  # Swin TransformerÉî¶È
-        'embed_dim': 60,  # Ç¶ÈëÎ¬¶È
-        'num_heads': [6, 6, 6, 6],  # ×¢ÒâÁ¦Í·Êı
-        'mlp_ratio': 2.,  # MLP±ÈÂÊ
+        'window_size': 8,
+        'depths': [6, 6, 6, 6],
+        'embed_dim': 60,
+        'num_heads': [6, 6, 6, 6],
+        'mlp_ratio': 2.,
         'qkv_bias': True,
         'qk_scale': None,
         'drop_rate': 0.,
@@ -163,7 +163,7 @@ def create_model(args):
         'resi_connection': '1conv'
     }
 
-    # ĞÂÔögdmÄ£ĞÍ²ÎÊı£¨¿É¸ù¾İnetwork_swinir_multi_gdm.pyÊµ¼ÊĞèÒªµ÷Õû£©
+    # GDM æ¨¡å‹å‚æ•°ï¼ˆæŒ‰ network_swinir_multi_gdm.py å…·ä½“å®ç°éœ€æ±‚ï¼‰
     gdm_params = {
         **base_params,
         'window_size': 8,
@@ -182,17 +182,17 @@ def create_model(args):
     elif args.model_type == 'swinir_gdm':
         model = SwinIRMultiGDM(**gdm_params)
     else:
-        raise ValueError(f"Î´ÖªµÄÄ£ĞÍÀàĞÍ: {args.model_type}")
+        raise ValueError(f"æœªçŸ¥çš„æ¨¡å‹ç±»å‹: {args.model_type}")
 
     return model
 
 
 def plot_loss_lines(args, train_losses, valid_losses, train_gdm_losses, train_gsl_losses,
                     valid_gdm_losses, valid_gsl_losses, save_dir):
-    """»æÖÆÑµÁ·ËğÊ§ÇúÏß"""
+    """ç»˜åˆ¶è®­ç»ƒæŸå¤±æ›²çº¿"""
     plt.figure(figsize=(15, 10))
 
-    # ×ÜËğÊ§
+    # æ€»æŸå¤±
     plt.subplot(221)
     plt.plot(train_losses, label='Train Total Loss')
     plt.plot(valid_losses, label='Valid Total Loss')
@@ -201,7 +201,7 @@ def plot_loss_lines(args, train_losses, valid_losses, train_gdm_losses, train_gs
     plt.ylabel('Loss')
     plt.legend()
 
-    # GDMËğÊ§
+    # GDM æŸå¤±
     plt.subplot(222)
     plt.plot(train_gdm_losses, label='Train GDM Loss')
     plt.plot(valid_gdm_losses, label='Valid GDM Loss')
@@ -210,7 +210,7 @@ def plot_loss_lines(args, train_losses, valid_losses, train_gdm_losses, train_gs
     plt.ylabel('Loss')
     plt.legend()
 
-    # GSLËğÊ§
+    # GSL æŸå¤±
     if args.model_type != 'swinir_gdm':
         plt.subplot(223)
         plt.plot(train_gsl_losses, label='Train GSL Loss')
@@ -227,7 +227,7 @@ def plot_loss_lines(args, train_losses, valid_losses, train_gdm_losses, train_gs
 
 def save_training_history(train_losses, valid_losses, train_gdm_losses, train_gsl_losses,
                           valid_gdm_losses, valid_gsl_losses, save_dir, model_type=None):
-    """±£´æÑµÁ·ÀúÊ·µ½CSVÎÄ¼ş"""
+    """ä¿å­˜è®­ç»ƒå†å²åˆ° CSV æ–‡ä»¶"""
     history = {
         'epoch': range(1, len(train_losses) + 1),
         'train_total_loss': train_losses,
@@ -244,36 +244,36 @@ def save_training_history(train_losses, valid_losses, train_gdm_losses, train_gs
 
 
 def save_args(args, save_dir):
-    """±£´æÑµÁ·²ÎÊı"""
+    """ä¿å­˜è®­ç»ƒå‚æ•°"""
     args_dict = vars(args)
     with open(os.path.join(save_dir, 'training_args.json'), 'w') as f:
         json.dump(args_dict, f, indent=4)
 
 
 def train_model(model, train_loader, valid_loader, args):
-    """ÑµÁ·Ä£ĞÍ"""
+    """è®­ç»ƒæ¨¡å‹"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
 
-    # ¶¨ÒåËğÊ§º¯Êı
-    gdm_criterion = nn.MSELoss()  # ³¬·Ö±æÂÊÖØ½¨ËğÊ§
-    gsl_criterion = nn.SmoothL1Loss()  # Ğ¹Â©Ô´¶¨Î»ËğÊ§
+    # å®šä¹‰æŸå¤±å‡½æ•°
+    gdm_criterion = nn.MSELoss()  # è¶…åˆ†è¾¨ç‡é‡å»ºæŸå¤±
+    gsl_criterion = nn.SmoothL1Loss()  # æºä½ç½®å®šä½æŸå¤±
 
-    # ¶¨ÒåÓÅ»¯Æ÷
+    # å®šä¹‰ä¼˜åŒ–å™¨
     # optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
 
-    # Ñ§Ï°ÂÊµ÷¶ÈÆ÷
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+    # å­¦ä¹ ç‡è°ƒåº¦
+    scheduler = ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5)
 
-    # ´´½¨±£´æÄ¿Â¼
+    # åˆ›å»ºä¿å­˜ç›®å½•
     os.makedirs(args.save_dir, exist_ok=True)
 
-    # ±£´æÑµÁ·²ÎÊı
+    # ä¿å­˜è®­ç»ƒå‚æ•°
     save_args(args, args.save_dir)
 
-    # ³õÊ¼»¯ÑµÁ·ÀúÊ·¼ÇÂ¼
+    # åˆå§‹åŒ–è®­ç»ƒå†å²è®°å½•
     train_losses = []
     valid_losses = []
     train_gdm_losses = []
@@ -281,11 +281,11 @@ def train_model(model, train_loader, valid_loader, args):
     valid_gdm_losses = []
     valid_gsl_losses = []
 
-    # ÑµÁ·Ñ­»·
+    # è®­ç»ƒå¾ªç¯
     best_valid_loss = float('inf')
     start_epoch = 0
 
-    # ¼ì²éÊÇ·ñÓĞcheckpoint¿ÉÒÔ»Ö¸´
+    # å¦‚å­˜åœ¨ checkpoint åˆ™æ¢å¤
     checkpoint_path = os.path.join(args.save_dir, "latest_checkpoint.pth")
     if os.path.exists(checkpoint_path):
         print(f"Loading checkpoint from {checkpoint_path}")
@@ -306,7 +306,7 @@ def train_model(model, train_loader, valid_loader, args):
         model.train()
         train_loss = 0
         train_gdm_loss = 0
-        train_gsl_loss = 0  # Ö»ÔÚ¶àÈÎÎñÊ±ÓÃ
+        train_gsl_loss = 0  # ä»…åœ¨å¤šä»»åŠ¡æ—¶ç”¨
 
         train_pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} [Train]',
                           leave=True, ncols=150)
@@ -330,7 +330,7 @@ def train_model(model, train_loader, valid_loader, args):
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
-            # ¸üĞÂ½ø¶ÈÌõ
+            # æ›´æ–°è¿›åº¦æ¡
             if args.model_type == 'swinir_gdm':
                 train_pbar.set_postfix(
                     {'loss': f'{loss.item():.4f}', 'gdm_loss': f'{gdm_loss.item():.4f}'})
@@ -342,7 +342,7 @@ def train_model(model, train_loader, valid_loader, args):
         if args.model_type != 'swinir_gdm':
             train_gsl_loss /= len(train_loader)
 
-        # ÑéÖ¤½×¶Î
+        # éªŒè¯é˜¶æ®µ
         model.eval()
         valid_loss = 0
         valid_gdm_loss = 0
@@ -387,7 +387,7 @@ def train_model(model, train_loader, valid_loader, args):
             train_gsl_losses.append(train_gsl_loss)
             valid_gsl_losses.append(valid_gsl_loss)
 
-        # ´òÓ¡ÑµÁ·ĞÅÏ¢
+        # æ‰“å°è®­ç»ƒä¿¡æ¯
         if args.model_type == 'swinir_gdm':
             print(f'\nEpoch {epoch+1}/{args.num_epochs} Summary:')
             print(f'Train Loss: {train_loss:.4f} (GDM: {train_gdm_loss:.4f})')
@@ -402,7 +402,7 @@ def train_model(model, train_loader, valid_loader, args):
         print(
             f'Epoch {epoch+1} finished at {time.strftime("%Y-%m-%d %H:%M:%S")}')
 
-        # ±£´æ×î¼ÑÄ£ĞÍ
+        # ä¿å­˜æœ€ä¼˜æ¨¡å‹
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
             save_path = os.path.join(
@@ -417,7 +417,7 @@ def train_model(model, train_loader, valid_loader, args):
             }, save_path)
             print(f'Best model saved to {save_path}')
 
-        # ±£´æcheckpoint
+        # ä¿å­˜ checkpoint
         checkpoint = {
             'epoch': epoch + 1,
             'model_state_dict': model.state_dict(),
@@ -434,33 +434,33 @@ def train_model(model, train_loader, valid_loader, args):
         torch.save(checkpoint, os.path.join(
             args.save_dir, "latest_checkpoint.pth"))
 
-        # Ã¿10¸öepoch±£´æÒ»´ÎÀúÊ·checkpoint
+        # æ¯ 10 ä¸ª epoch å¦å­˜å†å² checkpoint
         if (epoch + 1) % 10 == 0:
             history_checkpoint_path = os.path.join(
                 args.save_dir, f"checkpoint_epoch_{epoch+1}.pth")
             torch.save(checkpoint, history_checkpoint_path)
             print(f"Checkpoint saved at epoch {epoch+1}")
 
-        # »æÖÆËğÊ§ÇúÏß
+        # ç»˜åˆ¶æŸå¤±æ›²çº¿
         plot_loss_lines(args, train_losses, valid_losses,
                         train_gdm_losses, train_gsl_losses,
                         valid_gdm_losses, valid_gsl_losses,
                         args.save_dir)
 
-        # ±£´æÑµÁ·ÀúÊ·
+        # ä¿å­˜è®­ç»ƒå†å²
         save_training_history(train_losses, valid_losses,
                               train_gdm_losses, train_gsl_losses,
                               valid_gdm_losses, valid_gsl_losses,
                               args.save_dir, args.model_type)
 
-    # ÑµÁ·Íê³Éºó£¬±£´æÒ»·İ×î¼ÑÄ£ĞÍµÄ¸±±¾
+    # è®­ç»ƒç»“æŸåï¼Œå¤‡ä»½ä¸€ä»½æœ€ä½³æ¨¡å‹çš„å‰¯æœ¬
     best_model_path = os.path.join(
         args.save_dir, f'best_model_{args.model_type}.pth')
     if os.path.exists(best_model_path):
         shutil.copy2(best_model_path, os.path.join(
             args.save_dir, f"{args.model_type}_best_model.pth"))
         print(
-            f"×î¼ÑÄ£ĞÍ¸±±¾ÒÑ±£´æÖÁ: {os.path.join(args.save_dir, f'{args.model_type}_best_model.pth')}")
+            f"æœ€ä½³æ¨¡å‹å‰¯æœ¬å·²ä¿å­˜: {os.path.join(args.save_dir, f'{args.model_type}_best_model.pth')}")
 
     print("Training completed!")
     print(f"Best validation loss: {best_valid_loss:.4f}")
@@ -474,7 +474,7 @@ def train(args):
     print(f"Starting training with arguments: {args}")
     print(f"Using multi-task learning with GDM and GSL")
 
-    # CUDAÉèÖÃºÍÄÚ´æ¹ÜÀí
+    # CUDA è®¾ç½®å’Œå†…å­˜å¤„ç†
     torch.cuda.empty_cache()
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = True
@@ -487,15 +487,15 @@ def train(args):
         print(f"Cached: {torch.cuda.memory_reserved(0)/1024**2:.2f} MB")
     print(f"Using device: {device}")
 
-    # Êı¾İ¼¯¼ÓÔØºÍ´òÓ¡ĞÅÏ¢
+    # æ•°æ®é›†è½½å…¥å’Œæ‰“å°ä¿¡æ¯
     if args.use_test_set:
         train_set, valid_set, test_set = generate_train_valid_test_dataset(
             args.data_path, train_ratio=0.8, valid_ratio=0.1, shuffle=True)
-        print(f"Ê¹ÓÃ²âÊÔ¼¯»®·ÖÄ£Ê½£ºÑµÁ·¼¯80%£¬ÑéÖ¤¼¯10%£¬²âÊÔ¼¯10%")
+        print(f"ä½¿ç”¨æµ‹è¯•é›†åˆ’åˆ†æ¨¡å¼ï¼šè®­ç»ƒé›†80%ï¼ŒéªŒè¯é›†10%ï¼Œæµ‹è¯•é›†10%")
     else:
         train_set, valid_set, _ = generate_train_valid_test_dataset(
             args.data_path, train_ratio=0.8, valid_ratio=0.2, shuffle=True)
-        print(f"Ê¹ÓÃ´«Í³»®·ÖÄ£Ê½£ºÑµÁ·¼¯80%£¬ÑéÖ¤¼¯20%")
+        print(f"ä½¿ç”¨ä¼ ç»Ÿåˆ’åˆ†æ¨¡å¼ï¼šè®­ç»ƒé›†80%ï¼ŒéªŒè¯é›†20%")
 
     train_loader = DataLoader(
         train_set, batch_size=args.batch_size, shuffle=True,
@@ -504,7 +504,7 @@ def train(args):
         valid_set, batch_size=args.batch_size, shuffle=False,
         num_workers=0, pin_memory=True)
 
-    # ´òÓ¡Êı¾İ¼¯ĞÅÏ¢
+    # æ‰“å°æ•°æ®é›†ä¿¡æ¯
     sample = next(iter(train_loader))
     print(f"Data shapes:")
     print(f"LR: {sample['lr'].shape}")
@@ -519,10 +519,10 @@ def train(args):
     print(
         f"HR max position: [{sample['hr_max_pos'].min():.4f}, {sample['hr_max_pos'].max():.4f}]")
 
-    # ´´½¨Ä£ĞÍ
+    # åˆ›å»ºæ¨¡å‹
     model = create_model(args)
 
-    # ÑµÁ·Ä£ĞÍ
+    # è®­ç»ƒæ¨¡å‹
     model, train_losses, valid_losses, best_valid_loss = train_model(
         model, train_loader, valid_loader, args)
 
@@ -530,10 +530,9 @@ def train(args):
 def main():
     args = parse_args()
 
-    # ´´½¨±£´æÄ¿Â¼
+    # åˆ›å»ºä¿å­˜ç›®å½•
     os.makedirs(args.save_dir, exist_ok=True)
 
-    # ÑµÁ·Ä£ĞÍ
     train(args)
 
 
