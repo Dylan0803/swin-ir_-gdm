@@ -289,7 +289,21 @@ def train_model(model, train_loader, valid_loader, args):
     checkpoint_path = os.path.join(args.save_dir, "latest_checkpoint.pth")
     if os.path.exists(checkpoint_path):
         print(f"Loading checkpoint from {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path)
+        try:
+            checkpoint = torch.load(
+                checkpoint_path, map_location=device, weights_only=False)
+        except TypeError:
+            # 兼容旧版本 PyTorch（无 weights_only 参数）
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+        except Exception:
+            # 在安全模式下允许 argparse.Namespace 后再尝试
+            try:
+                import argparse as _argparse
+                from torch.serialization import add_safe_globals
+                add_safe_globals([_argparse.Namespace])
+                checkpoint = torch.load(checkpoint_path, map_location=device)
+            except Exception as e:
+                raise e
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch']
