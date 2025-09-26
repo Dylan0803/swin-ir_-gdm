@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from models.network_swinir_multi_gdm import SwinIRMulti as SwinIRMultiGDM
 import os
 import torch
@@ -22,22 +23,22 @@ import sys
 import json
 import torch.serialization
 from argparse import Namespace
-# Ìí¼ÓÏîÄ¿¸ùÄ¿Â¼µ½PythonÂ·¾¶
+# æ·»åŠ é¡¹ç›®æ ¹ç›®å½•åˆ°Pythonè·¯å¾„
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
 
 def evaluate_model(model, dataloader, device):
     """
-    ÆÀ¹ÀÄ£ĞÍĞÔÄÜ
+    è¯„ä¼°æ¨¡å‹æ€§èƒ½
 
-    ²ÎÊı:
-        model: ÑµÁ·ºÃµÄÄ£ĞÍ
-        dataloader: Êı¾İ¼ÓÔØÆ÷
-        device: Éè±¸
+    å‚æ•°:
+        model: è®­ç»ƒå¥½çš„æ¨¡å‹
+        dataloader: æ•°æ®åŠ è½½å™¨
+        device: è®¾å¤‡
 
-    ·µ»Ø:
-        dict: °üº¬¸÷ÏîÆÀ¹ÀÖ¸±êµÄ×Öµä
+    è¿”å›:
+        dict: åŒ…å«å„é¡¹è¯„ä¼°æŒ‡æ ‡çš„å­—å…¸
     """
     model.eval()
     metrics = {
@@ -50,23 +51,23 @@ def evaluate_model(model, dataloader, device):
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Evaluating"):
             try:
-                # Êı¾İÔ¤´¦Àí
+                # æ•°æ®é¢„å¤„ç†
                 lr = batch['lr'].to(device)
                 hr = batch['hr'].to(device)
                 source_pos = batch['source_pos'].to(device)
                 hr_max_pos = batch['hr_max_pos'].to(device)
 
-                # Ä£ĞÍÍÆÀí
+                # æ¨¡å‹æ¨ç†
                 gdm_out, gsl_out = model(lr)
 
-                # ¼ÆËãGDMÖ¸±ê
+                # è®¡ç®—GDMæŒ‡æ ‡
                 for i in range(gdm_out.size(0)):
                     # PSNR
                     mse = torch.mean((gdm_out[i] - hr[i]) ** 2)
                     psnr = 20 * torch.log10(1.0 / torch.sqrt(mse))
                     metrics['gdm_psnr'].append(psnr.item())
 
-                    # SSIM (¼ò»¯°æ)
+                    # SSIM (ï¿½ò»¯°ï¿½)
                     c1 = (0.01 * 1.0) ** 2
                     c2 = (0.03 * 1.0) ** 2
                     mu1 = torch.mean(gdm_out[i])
@@ -78,12 +79,12 @@ def evaluate_model(model, dataloader, device):
                            ((mu1 ** 2 + mu2 ** 2 + c1) * (sigma1 + sigma2 + c2))
                     metrics['gdm_ssim'].append(ssim.item())
 
-                # ¼ÆËãGSLÖ¸±ê
-                # ·´¹éÒ»»¯×ø±ê£¨³ËÒÔ95.0£©
+                # è®¡ç®—GSLæŒ‡æ ‡
+                # è½¬æ¢åˆ°å®é™…åæ ‡ï¼ˆä¹˜ä»¥95.0ï¼‰
                 true_pos = source_pos * 95.0
                 pred_pos = gsl_out * 95.0
 
-                # ¼ÆËã·´¹éÒ»»¯ºóµÄ¾àÀë²¢³ıÒÔ10
+                # è®¡ç®—åå½’ä¸€åŒ–åçš„è·ç¦»å¹¶é™¤ä»¥10
                 position_error = torch.sqrt(
                     torch.sum((pred_pos - true_pos) ** 2, dim=1)) / 10.0
                 max_pos_error = torch.sqrt(
@@ -95,10 +96,10 @@ def evaluate_model(model, dataloader, device):
                     max_pos_error.cpu().numpy())
 
             except KeyError as e:
-                print(f"Ìø¹ıÎŞĞ§Êı¾İ: {e}")
+                print(f"è·³è¿‡æ— æ•ˆæ•°æ®: {e}")
                 continue
 
-    # ¼ÆËãÆ½¾ùÖ¸±ê
+    # è®¡ç®—å¹³å‡æŒ‡æ ‡
     results = {
         'GDM_PSNR': np.mean(metrics['gdm_psnr']) if metrics['gdm_psnr'] else 0,
         'GDM_SSIM': np.mean(metrics['gdm_ssim']) if metrics['gdm_ssim'] else 0,
@@ -110,31 +111,31 @@ def evaluate_model(model, dataloader, device):
 
 
 def plot_metrics(metrics, save_dir):
-    """»æÖÆÆÀ¹ÀÖ¸±ê·Ö²¼Í¼"""
+    """ç»˜åˆ¶å„é¡¹æŒ‡æ ‡åˆ†å¸ƒå›¾"""
     plt.figure(figsize=(15, 10))
 
-    # GDM PSNR·Ö²¼
+    # GDM PSNRåˆ†å¸ƒ
     plt.subplot(221)
     plt.hist(metrics['gdm_psnr'], bins=50)
     plt.title('GDM PSNR Distribution')
     plt.xlabel('PSNR (dB)')
     plt.ylabel('Count')
 
-    # GDM SSIM·Ö²¼
+    # GDM SSIMåˆ†å¸ƒ
     plt.subplot(222)
     plt.hist(metrics['gdm_ssim'], bins=50)
     plt.title('GDM SSIM Distribution')
     plt.xlabel('SSIM')
     plt.ylabel('Count')
 
-    # GSLÎ»ÖÃÎó²î·Ö²¼
+    # GSLä½ç½®è¯¯å·®åˆ†å¸ƒ
     plt.subplot(223)
     plt.hist(metrics['gsl_position_error'], bins=50)
     plt.title('GSL Position Error Distribution')
     plt.xlabel('Error (normalized)')
     plt.ylabel('Count')
 
-    # GSL×î´óÅ¨¶ÈÎ»ÖÃÎó²î·Ö²¼
+    # GSLæœ€å¤§å€¼ä½ç½®è¯¯å·®åˆ†å¸ƒ
     plt.subplot(224)
     plt.hist(metrics['gsl_max_pos_error'], bins=50)
     plt.title('GSL Max Position Error Distribution')
@@ -147,71 +148,71 @@ def plot_metrics(metrics, save_dir):
 
 
 def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_path):
-    """¿ÉÊÓ»¯µ¥¸öÑù±¾µÄ½á¹û"""
-    # ×ª»»ÎªnumpyÊı×é²¢ÒÆ³ıbatchÎ¬¶È
+    """å¯è§†åŒ–æ¨ç†ç»“æœ"""
+    # è½¬æ¢ä¸ºnumpyæ•°ç»„å¹¶ç§»é™¤batchç»´åº¦
     lr = lr.squeeze().cpu().numpy()
     hr = hr.squeeze().cpu().numpy()
     gdm_out = gdm_out.squeeze().cpu().numpy()
 
-    # ¼ÆËã²îÖµÍ¼ - »»»Ø·Ç¾ø¶ÔÖµ
+    # è®¡ç®—å·®å€¼å›¾ - æ˜¾ç¤ºéå½’ä¸€åŒ–å€¼
     diff = hr - gdm_out
 
-    # ´´½¨Í¼Ïñ£¬µ÷Õû×ÓÍ¼¼ä¾àÒÔÈİÄÉµ×²¿Í¼×¢
+    # ï¿½ï¿½ï¿½ï¿½Í¼ï¿½ñ£¬µï¿½ï¿½ï¿½ï¿½ï¿½Í¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Éµ×²ï¿½Í¼×¢
     fig, axes = plt.subplots(2, 2, figsize=(12, 12))
 
-    # ÉèÖÃ×Ü±êÌâÔÚµ×²¿
+    # å°†æ€»æ ‡é¢˜æ”¾åœ¨åº•éƒ¨
     fig.suptitle('Gas Concentration Distribution', fontsize=16, y=0.02)
 
-    # µÍ·Ö±æÂÊÊäÈë
+    # ä½åˆ†è¾¨ç‡è¾“å…¥
     im0 = axes[0, 0].imshow(lr, cmap='viridis')
     axes[0, 0].set_title('Low Resolution Input', pad=20, y=-0.15)
     axes[0, 0].axis('off')
-    # ÒÆ³ıÑÕÉ«Ìõ
+    # ç§»é™¤é¢œè‰²æ¡
 
-    # ¸ß·Ö±æÂÊÕæÊµÖµ
+    # é«˜åˆ†è¾¨ç‡çœŸå®å€¼
     im1 = axes[0, 1].imshow(hr, cmap='viridis')
     axes[0, 1].set_title('High Resolution Ground Truth', pad=20, y=-0.15)
     axes[0, 1].axis('off')
-    # ÒÆ³ıÑÕÉ«Ìõ
+    # ç§»é™¤é¢œè‰²æ¡
 
-    # Ä£ĞÍÊä³ö£¨³¬·Ö±æÂÊ£©
+    # æ¨¡å‹è¾“å‡ºè¶…åˆ†è¾¨ç‡
     im2 = axes[1, 0].imshow(gdm_out, cmap='viridis')
     axes[1, 0].set_title('Super Resolution Output', pad=20, y=-0.15)
     axes[1, 0].axis('off')
-    # ÒÆ³ıÑÕÉ«Ìõ
+    # ç§»é™¤é¢œè‰²æ¡
 
-    # Ö»ÔÚ·ÇgdmÄ£ĞÍÊ±»­Ğ¹Â©Ô´µã
+    # åªåœ¨égdmæ¨¡å‹æ—¶æ˜¾ç¤ºæ³„æ¼æº
     if (gsl_out is not None) and (source_pos is not None) and (hr_max_pos is not None):
         gsl_out = gsl_out.squeeze().cpu().numpy()
         source_pos = source_pos.squeeze().cpu().numpy()
         hr_max_pos = hr_max_pos.squeeze().cpu().numpy()
-        # ·´¹éÒ»»¯×ø±ê£¨³ËÒÔ95.0£©
+        # è½¬æ¢åˆ°å®é™…åæ ‡ï¼ˆä¹˜ä»¥95.0ï¼‰
         true_pos = source_pos * 95.0
         pred_pos = gsl_out * 95.0
-        # ±ê¼ÇÕæÊµĞ¹Â©Ô´Î»ÖÃ£¨ºìÉ«ĞÇĞÎ£©
+        # æ ‡è®°çœŸå®æ³„æ¼æºä½ç½®ï¼ˆçº¢è‰²æ˜Ÿå½¢ï¼‰
         axes[1, 0].plot(true_pos[0], true_pos[1], 'r*',
                         markersize=15, label='True Source')
-        # ±ê¼ÇÔ¤²âĞ¹Â©Ô´Î»ÖÃ£¨ÂÌÉ«ĞÇĞÎ£©
+        # æ ‡è®°é¢„æµ‹æ³„æ¼æºä½ç½®ï¼ˆç»¿è‰²æ˜Ÿå½¢ï¼‰
         axes[1, 0].plot(pred_pos[0], pred_pos[1], 'g*',
                         markersize=15, label='Predicted Source')
-        # Ìí¼ÓÍ¼Àı
+        # æ·»åŠ å›¾ä¾‹
         axes[1, 0].legend(loc='upper right')
 
-    # ²îÖµÍ¼ - »»»Ø·Ç¾ø¶ÔÖµ£¬Ê¹ÓÃRdBu_rÑÕÉ«Ó³Éä
+    # å·®å€¼å›¾ - æ˜¾ç¤ºéå½’ä¸€åŒ–å€¼ï¼Œä½¿ç”¨RdBu_ré¢œè‰²æ˜ å°„
     im3 = axes[1, 1].imshow(diff, cmap='RdBu_r', vmin=-0.5, vmax=0.5)
     axes[1, 1].set_title('SR-HR', pad=20, y=-0.15)
     axes[1, 1].axis('off')
-    # ÒÆ³ıÑÕÉ«Ìõ
+    # ç§»é™¤é¢œè‰²æ¡
 
-    # µ÷Õû²¼¾Ö£¬Îªµ×²¿±êÌâÁô³ö¿Õ¼ä
+    # è°ƒæ•´å¸ƒå±€ï¼Œä¸ºåº•éƒ¨æ ‡é¢˜ç•™å‡ºç©ºé—´
     plt.tight_layout()
-    plt.subplots_adjust(bottom=0.12)  # Îªµ×²¿±êÌâÁô³ö¸ü¶à¿Õ¼ä
+    plt.subplots_adjust(bottom=0.12)  # Îªï¿½×²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Õ¼ï¿½
 
-    # ±£´æÍ¼Ïñ
+    # ä¿å­˜å›¾ç‰‡
     plt.savefig(save_path, bbox_inches='tight', dpi=120)
     plt.close()
 
-    # Ö»ÔÚpred_posºÍtrue_pos¶¼ÒÑ¶¨ÒåÊ±·µ»Ø¾àÀë
+    # åªåœ¨pred_poså’Œtrue_poséƒ½å·²å®šä¹‰æ—¶è¿”å›è·ç¦»
     if ('pred_pos' in locals()) and ('true_pos' in locals()):
         distance = np.sqrt(np.sum((pred_pos - true_pos) ** 2)) / 10.0
         return distance
@@ -220,18 +221,18 @@ def visualize_results(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_pat
 
 
 def save_sample_data(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_dir, sample_idx, model_type):
-    """±£´æÃ¿¸öÑù±¾µÄÊı¾İµ½Ö¸¶¨Ä¿Â¼£¨ÒÑÎª¸ÃÑù±¾´´½¨µÄÄ¿Â¼£©"""
+    """ä¿å­˜æ¯ä¸ªæ ·æœ¬çš„è¯¦ç»†æ•°æ®åˆ°æŒ‡å®šç›®å½•ï¼Œç”¨äºåç»­åˆ†æ"""
     import numpy as np
 
-    # save_dir ÒÑÊÇ¸ÃÑù±¾µÄÄ¿Â¼
+    # save_dir æ˜¯å„æ ·æœ¬çš„ç›®å½•
     os.makedirs(save_dir, exist_ok=True)
 
-    # ×ª»»ÎªnumpyÊı×é²¢ÒÆ³ıbatchÎ¬¶È
+    # è½¬æ¢ä¸ºnumpyæ•°ç»„å¹¶ç§»é™¤batchç»´åº¦
     lr_np = lr.squeeze().cpu().numpy()
     hr_np = hr.squeeze().cpu().numpy()
     gdm_out_np = gdm_out.squeeze().cpu().numpy()
 
-    # ±£´æLR¡¢HR¡¢GDMÊä³öÊı¾İÎªCSV
+    # ä¿å­˜LRã€HRã€GDMè¾“å‡ºä¸ºCSV
     np.savetxt(os.path.join(save_dir, 'lr.csv'),
                lr_np, delimiter=',', fmt='%.6f')
     np.savetxt(os.path.join(save_dir, 'hr.csv'),
@@ -239,19 +240,19 @@ def save_sample_data(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_dir,
     np.savetxt(os.path.join(save_dir, 'gdm_out.csv'),
                gdm_out_np, delimiter=',', fmt='%.6f')
 
-    # ±£´æ²îÖµÊı¾İÎªCSV
+    # ä¿å­˜å·®å€¼æ•°æ®ä¸ºCSV
     diff = hr_np - gdm_out_np
     np.savetxt(os.path.join(save_dir, 'difference.csv'),
                diff, delimiter=',', fmt='%.6f')
 
-    # ±£´æGSLÏà¹ØÊı¾İ£¨Èç¹û´æÔÚ£©
+    # ä¿å­˜GSLç›¸å…³æ•°æ®ï¼ˆå¦‚æœå­˜åœ¨ï¼‰
     if model_type != 'swinir_gdm' and gsl_out is not None and source_pos is not None:
         gsl_out_np = gsl_out.squeeze().cpu().numpy()
         source_pos_np = source_pos.squeeze().cpu().numpy()
         hr_max_pos_np = hr_max_pos.squeeze().cpu(
         ).numpy() if hr_max_pos is not None else None
 
-        # ¶Ô original Ä£ĞÍ£¬È«²¿¸ÄÎª CSV ±£´æ
+        # å¯¹ original æ¨¡å‹ï¼Œå…¨éƒ¨ä¿å­˜ä¸º CSV æ ¼å¼
         if model_type == 'original':
             np.savetxt(os.path.join(save_dir, 'gsl_out.csv'),
                        gsl_out_np, delimiter=',', fmt='%.6f')
@@ -267,7 +268,7 @@ def save_sample_data(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_dir,
                 np.save(os.path.join(save_dir,
                         'hr_max_pos.npy'), hr_max_pos_np)
 
-    # ±£´æÔªÊı¾İĞÅÏ¢
+    # ä¿å­˜å…ƒæ•°æ®ä¿¡æ¯
     metadata = {
         'sample_idx': sample_idx,
         'model_type': model_type,
@@ -281,48 +282,48 @@ def save_sample_data(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos, save_dir,
         'diff_range': [float(diff.min()), float(diff.max())]
     }
 
-    # ±£´æÔªÊı¾İÎªJSONÎÄ¼ş
+    # ä¿å­˜å…ƒæ•°æ®ä¸ºJSONæ–‡ä»¶
     import json
     with open(os.path.join(save_dir, 'metadata.json'), 'w') as f:
         json.dump(metadata, f, indent=2)
 
-    print(f"Ñù±¾ {sample_idx} µÄÊı¾İÒÑ±£´æµ½: {save_dir}")
+    print(f"æ ·æœ¬ {sample_idx} çš„æ•°æ®å·²ä¿å­˜åˆ°: {save_dir}")
 
 
 def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, model_type='original'):
     """
-    Ä£ĞÍÍÆÀíº¯Êı
+    Ä£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-    ²ÎÊı:
-        model: ÑµÁ·ºÃµÄÄ£ĞÍ
-        data_path: Êı¾İÂ·¾¶
-        save_dir: ±£´æ½á¹ûµÄÄ¿Â¼
-        num_samples: ÒªÆÀ¹ÀµÄÑù±¾ÊıÁ¿
-        sample_indices: Ö¸¶¨ÒªÆÀ¹ÀµÄÑù±¾Ë÷ÒıÁĞ±í£¬Èç¹ûÎªNoneÔòËæ»úÑ¡Ôñ
+    ï¿½ï¿½ï¿½ï¿½:
+        model: Ñµï¿½ï¿½ï¿½Ãµï¿½Ä£ï¿½ï¿½
+        data_path: ï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½
+        save_dir: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿Â¼
+        num_samples: Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+        sample_indices: Ö¸ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÎªNoneï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½
     """
-    # ´´½¨Ä£ĞÍ×¨Êô±£´æ¸ùÄ¿Â¼
+    # åˆ›å»ºæ¨¡å‹ä¸“å±çš„ç»“æœç›®å½•
     base_save_dir = os.path.abspath(save_dir)
     if model_type == 'swinir_gdm':
         model_root = os.path.join(base_save_dir, 'swinir_gdm_results')
-    else:  # original ¼°ÆäËû
+    else:  # original ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         model_root = os.path.join(base_save_dir, 'swinir_multi_results')
     os.makedirs(model_root, exist_ok=True)
 
-    # ¼ÓÔØÊı¾İ¼¯£¬ÉèÖÃshuffle=FalseÈ·±£Êı¾İ²»´òÂÒ
+    # åˆ›å»ºæ•°æ®é›†ï¼Œè®¾ç½®shuffle=Falseç¡®ä¿æ•°æ®ä¸éšæœº
     dataset = MultiTaskDataset(data_path, shuffle=False)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 
-    # ÉèÖÃÉè±¸
+    # è·å–è®¾å¤‡
     device = next(model.parameters()).device
 
-    # ÆÀ¹ÀÖ¸±ê
+    # åˆå§‹åŒ–æŒ‡æ ‡
     total_psnr = 0
     total_position_error = 0
     total_mse = 0
     total_ssim = 0
     valid_samples = 0
 
-    # Èç¹ûÌá¹©ÁËÑù±¾Ë÷Òı£¬ÔòÖ»ÆÀ¹ÀÖ¸¶¨µÄÑù±¾
+    # å¦‚æœæä¾›äº†æ ·æœ¬ç´¢å¼•ï¼Œåˆ™åªè¯„ä¼°æŒ‡å®šçš„æ ·æœ¬
     if sample_indices is not None and len(sample_indices) > 0:
         indices_to_evaluate = sample_indices
     else:
@@ -330,21 +331,21 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, 
         if num_samples < len(indices_to_evaluate):
             indices_to_evaluate = indices_to_evaluate[:num_samples]
 
-    print(f"ÆÀ¹ÀÑù±¾Ë÷Òı: {indices_to_evaluate}")
+    print(f"è¦è¯„ä¼°çš„æ ·æœ¬: {indices_to_evaluate}")
 
-    # ´¦ÀíÖ¸¶¨Ë÷ÒıµÄÑù±¾
+    # åˆå§‹åŒ–æŒ‡æ ‡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     for idx in indices_to_evaluate:
         try:
-            # »ñÈ¡Ö¸¶¨Ë÷ÒıµÄÑù±¾
+            # è·å–æŒ‡å®šçš„æ ·æœ¬æ•°æ®
             batch = dataset[idx]
 
-            # ½«Êı¾İÒÆµ½Éè±¸ÉÏ
-            lr = batch['lr'].unsqueeze(0).to(device)  # Ìí¼ÓbatchÎ¬¶È
+            # å°†æ•°æ®ç§»åŠ¨åˆ°è®¾å¤‡ä¸Š
+            lr = batch['lr'].unsqueeze(0).to(device)  # ï¿½ï¿½ï¿½ï¿½batchÎ¬ï¿½ï¿½
             hr = batch['hr'].unsqueeze(0).to(device)
             source_pos = batch['source_pos'].unsqueeze(0).to(
                 device) if 'source_pos' in batch else None
 
-            # Ä£ĞÍÍÆÀí
+            # Ä£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             with torch.no_grad():
                 if model_type == 'swinir_gdm':
                     gdm_out = model(lr)
@@ -352,21 +353,21 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, 
                 else:
                     gdm_out, gsl_out = model(lr)
 
-            # ¼ÆËãHRÍ¼ÏñµÄ×î´óÖµÎ»ÖÃ
+            # è®¡ç®—HRå›¾åƒæœ€å¤§å€¼ä½ç½®
             hr_max_pos = torch.tensor([torch.argmax(hr[0, 0]) % hr.shape[3],
                                        torch.argmax(hr[0, 0]) // hr.shape[3]],
                                       dtype=torch.float32).to(device)
             hr_max_pos = hr_max_pos / torch.tensor([hr.shape[3], hr.shape[2]],
                                                    dtype=torch.float32).to(device)
 
-            # ¼ÆËãÆÀ¹ÀÖ¸±ê
-            # MSEËğÊ§
+            # è®¡ç®—å„é¡¹æŒ‡æ ‡
+            # MSEæŸå¤±
             mse = F.mse_loss(gdm_out, hr)
 
             # PSNR
             psnr = 10 * torch.log10(1.0 / mse)
 
-            # SSIM¼ÆËã
+            # SSIMè®¡ç®—
             c1 = (0.01 * 1.0) ** 2
             c2 = (0.03 * 1.0) ** 2
             mu1 = torch.mean(gdm_out)
@@ -382,25 +383,25 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, 
             total_ssim += ssim.item()
             valid_samples += 1
 
-            # Ö»ÔÚ·ÇgdmÄ£ĞÍÊ±¼ÆËãGSLÏà¹Ø
+            # åªåœ¨égdmæ¨¡å‹æ—¶è®¡ç®—GSLè¯¯å·®
             if model_type != 'swinir_gdm':
-                # ·´¹éÒ»»¯×ø±ê£¨³ËÒÔ95.0£©
+                # è½¬æ¢åˆ°å®é™…åæ ‡ï¼ˆä¹˜ä»¥95.0ï¼‰
                 true_pos = source_pos * 95.0
                 pred_pos = gsl_out * 95.0
-                # ¼ÆËã·´¹éÒ»»¯ºóµÄÖ±Ïß¾àÀë²¢³ıÒÔ10£¨×ª»»ÎªÃ×£©
+                # è®¡ç®—åå½’ä¸€åŒ–åçš„ç›´çº¿è·ç¦»å¹¶é™¤ä»¥10ï¼ˆè½¬æ¢ä¸ºç±³ï¼‰
                 position_error = torch.sqrt(
                     torch.sum((pred_pos - true_pos) ** 2)) / 10.0
                 total_position_error += position_error.item()
 
-            # Îª¸ÃÑù±¾´´½¨¶ÀÁ¢Ä¿Â¼
+            # ä¸ºæ¯ä¸ªæ ·æœ¬åˆ›å»ºç‹¬ç«‹ç›®å½•
             sample_dir = os.path.join(model_root, f'sample_{idx}')
             os.makedirs(sample_dir, exist_ok=True)
 
-            # ±£´æÑù±¾Êı¾İ£¨º¬npyÓëmetadata£©
+            # ä¿å­˜æ ·æœ¬æ•°æ®ï¼ˆnpyå’Œmetadataï¼‰
             save_sample_data(lr, hr, gdm_out, gsl_out, source_pos, hr_max_pos,
                              sample_dir, idx, model_type)
 
-            # ±£´æ×éºÏÍ¼µ½Ñù±¾Ä¿Â¼
+            # ä¿å­˜åˆæˆå›¾åˆ°æ ·æœ¬ç›®å½•
             save_path = os.path.join(sample_dir, f'sample_{idx}_composite.png')
             if model_type == 'swinir_gdm':
                 visualize_results(lr, hr, gdm_out, None, None, None, save_path)
@@ -408,7 +409,7 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, 
                 visualize_results(lr, hr, gdm_out, gsl_out,
                                   source_pos, hr_max_pos, save_path)
 
-            # ÁíÍâµ¥¶À±£´æ LR / HR / GDM ÈıÕÅÍ¼£¨ÎŞ×ø±êÖá/ÑÕÉ«Ìõ£©
+            # é¢å¤–å•ç‹¬ä¿å­˜ LR / HR / GDM å›¾åƒï¼ˆæ— æ ‡é¢˜/é¢œè‰²æ¡ï¼‰
             lr_np = lr.squeeze().detach().cpu().numpy()
             hr_np = hr.squeeze().detach().cpu().numpy()
             gdm_np = gdm_out.squeeze().detach().cpu().numpy()
@@ -431,7 +432,7 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, 
 
             plt.figure(figsize=(5, 5))
             plt.imshow(gdm_np, cmap='viridis')
-            # ¶Ô original Ä£ĞÍ£¬ÔÚ¶ÀÁ¢GDMÍ¼ÉÏ±ê×¢ÕæÖµÓëÔ¤²âĞ¹Â©Ô´Î»ÖÃ
+            # å¯¹ original æ¨¡å‹ï¼Œåœ¨å•ç‹¬GDMå›¾ä¸Šæ ‡æ³¨çœŸå®/é¢„æµ‹æ³„æ¼æºä½ç½®
             if model_type != 'swinir_gdm' and gsl_out is not None and source_pos is not None:
                 gsl_out_np = gsl_out.squeeze().detach().cpu().numpy()
                 source_pos_np = source_pos.squeeze().detach().cpu().numpy()
@@ -449,19 +450,19 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, 
             plt.close()
 
         except KeyError as e:
-            print(f"Ìø¹ıÎŞĞ§Êı¾İ: {e}")
+            print(f"ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ§ï¿½ï¿½ï¿½ï¿½: {e}")
             continue
         except Exception as e:
-            print(f"´¦ÀíÑù±¾Ê±³ö´í: {e}")
+            print(f"å¤„ç†æ ·æœ¬æ—¶å‡ºé”™: {e}")
             continue
 
-    # ¼ÆËãÆ½¾ùÖ¸±ê
+    # è®¡ç®—å¹³å‡æŒ‡æ ‡
     if valid_samples > 0:
         avg_psnr = total_psnr / valid_samples
         avg_mse = total_mse / valid_samples
         avg_ssim = total_ssim / valid_samples
-        print(f"\nÆÀ¹À½á¹û:")
-        print(f"ÓĞĞ§Ñù±¾Êı: {valid_samples}")
+        print(f"\nï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½:")
+        print(f"æœ‰æ•ˆæ ·æœ¬æ•°: {valid_samples}")
         print(f"Average PSNR: {avg_psnr:.2f} dB")
         print(f"Average MSE: {avg_mse:.6f}")
         print(f"Average SSIM: {avg_ssim:.4f}")
@@ -469,19 +470,19 @@ def infer_model(model, data_path, save_dir, num_samples=5, sample_indices=None, 
             avg_position_error = total_position_error / valid_samples
             print(f"Average Position Error: {avg_position_error:.4f} m")
     else:
-        print("Ã»ÓĞÓĞĞ§µÄÑù±¾¿É¹©ÆÀ¹À")
+        print("æ²¡æœ‰æœ‰æ•ˆæ ·æœ¬æˆåŠŸå¤„ç†")
 
 
 def get_dataset_indices(sample_specs, dataset):
     """
-    ¸ù¾İÑù±¾¹æ¸ñ»ñÈ¡Êı¾İ¼¯ÖĞµÄÊµ¼ÊË÷Òı£¬ÑÏ¸ñ°´ sample_specs Ë³Ğò·µ»Ø
-    Ö»´¦Àí´æÔÚµÄÊı¾İ£¬Ìø¹ı²»´æÔÚµÄ×é
+    ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¡ï¿½ï¿½ï¿½İ¼ï¿½ï¿½Ğµï¿½Êµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ sample_specs Ë³ï¿½ò·µ»ï¿½
+    Ö»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Úµï¿½ï¿½ï¿½ï¿½İ£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Úµï¿½ï¿½ï¿½
     """
     actual_indices = []
     if not sample_specs:
         return actual_indices
 
-    # ÏÈ¹¹½¨Ò»¸ö²éÕÒ±í£¬Ö»°üº¬´æÔÚµÄÊı¾İ
+    # å…ˆæ„å»ºä¸€ä¸ªæ˜ å°„è¡¨ï¼ŒåªåŒ…å«å­˜åœ¨çš„æ•°æ®
     index_map = {}
     for idx in range(len(dataset)):
         try:
@@ -489,20 +490,20 @@ def get_dataset_indices(sample_specs, dataset):
             key = f"{data_info['wind_group']},{data_info['source_group']},{data_info['time_step']}"
             index_map[key] = idx
         except Exception:
-            # ¾²Ä¬Ìø¹ı²»´æÔÚµÄÊı¾İ
+            # å¿½ç•¥ä¸å­˜åœ¨çš„æ•°æ®
             continue
 
-    # °´ sample_specs Ë³Ğò²éÕÒ£¬Ö»´¦Àí´æÔÚµÄÊı¾İ
+    # æŒ‰ sample_specs é¡ºåºæŸ¥æ‰¾ï¼Œåªè¿”å›å­˜åœ¨çš„æ•°æ®
     for spec in sample_specs:
         try:
             idx = index_map.get(spec)
             if idx is not None:
                 actual_indices.append(idx)
-                print(f"ÕÒµ½Æ¥ÅäÑù±¾: {spec}, Ë÷Òı={idx}")
+                print(f"æ‰¾åˆ°åŒ¹é…æ•°æ®: {spec}, ç´¢å¼•={idx}")
             else:
-                print(f"Î´ÕÒµ½Æ¥ÅäÑù±¾: {spec}")
+                print(f"æœªæ‰¾åˆ°åŒ¹é…æ•°æ®: {spec}")
         except Exception:
-            # ¾²Ä¬Ìø¹ı²»´æÔÚµÄÊı¾İ
+            # å¿½ç•¥ä¸å­˜åœ¨çš„æ•°æ®
             continue
 
     return actual_indices
@@ -512,59 +513,59 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description='Evaluate SwinIR Multi-task Model')
 
-    # Ìí¼ÓÄ£ĞÍÀàĞÍÑ¡Ôñ²ÎÊı
+    # æ¨¡å‹ç±»å‹é€‰æ‹©å‚æ•°
     parser.add_argument('--model_type', type=str, default='original',
                         choices=['original', 'enhanced',
                                  'hybrid', 'fuse', 'swinir_gdm'],
-                        help='Ñ¡ÔñÄ£ĞÍÀàĞÍ: original, enhanced, hybrid, fuse, swinir_gdm')
+                        help='é€‰æ‹©æ¨¡å‹ç±»å‹: original, enhanced, hybrid, fuse, swinir_gdm')
 
-    # Ìí¼ÓÈ±Ê§µÄ²ÎÊı
+    # å¿…éœ€ç¼ºå¤±çš„å‚æ•°
     parser.add_argument('--model_path', type=str, required=True,
-                        help='Ä£ĞÍÈ¨ÖØÂ·¾¶')
+                        help='æ¨¡å‹æƒé‡è·¯å¾„')
     parser.add_argument('--data_path', type=str, required=True,
-                        help='Êı¾İ¼¯Â·¾¶')
+                        help='æ•°æ®é›†è·¯å¾„')
     parser.add_argument('--save_dir', type=str, default='evaluation_results',
-                        help='ÆÀ¹À½á¹û±£´æÄ¿Â¼')
+                        help='ç»“æœä¿å­˜ç›®å½•')
     parser.add_argument('--device', type=str, default='cuda',
-                        help='Ê¹ÓÃµÄÉè±¸')
+                        help='ä½¿ç”¨çš„è®¾å¤‡')
     parser.add_argument('--num_samples', type=int, default=5,
-                        help='ÒªÆÀ¹ÀµÄÑù±¾ÊıÁ¿')
+                        help='è¦è¯„ä¼°çš„æ ·æœ¬æ•°é‡')
 
-    # ²âÊÔÄ£Ê½Ñ¡Ôñ£¬Ôö¼Óall_generalizationºÍall_test_set
+    # æµ‹è¯•æ¨¡å¼é€‰æ‹©ï¼ˆåŒ…æ‹¬all_generalizationå’Œall_test_setï¼‰
     parser.add_argument('--test_mode', type=str, default='generalization',
                         choices=['generalization', 'test_set',
                                  'all_generalization', 'all_test_set'],
-                        help='²âÊÔÄ£Ê½£ºgeneralization£¨·º»¯²âÊÔ£©¡¢test_set£¨²âÊÔ¼¯£©¡¢all_generalization£¨·º»¯È«Á¿£©¡¢all_test_set£¨²âÊÔ¼¯È«Á¿£©')
+                        help='æµ‹è¯•æ¨¡å¼ï¼šgeneralizationï¼ˆæ³›åŒ–æµ‹è¯•ï¼‰ï¼Œtest_setï¼ˆæµ‹è¯•é›†ï¼‰ï¼Œall_generalizationï¼ˆæ³›åŒ–å…¨é‡ï¼‰ï¼Œall_test_setï¼ˆæµ‹è¯•é›†å…¨é‡ï¼‰')
 
-    # Ñù±¾Ñ¡Ôñ²ÎÊı
+    # æ ·æœ¬é€‰æ‹©å‚æ•°
     parser.add_argument('--sample_specs', type=str, default=None,
-                        help='·º»¯²âÊÔµÄÑù±¾¹æ¸ñ£¬ÓÃ·ÖºÅ·Ö¸ô£¬ÀıÈç£ºwind1_0,s1,50;wind2_0,s2,30')
+                        help='è¦æµ‹è¯•çš„æ ·æœ¬è§„æ ¼ï¼Œç”¨åˆ†å·åˆ†éš”ï¼Œå¦‚ï¼šwind1_0,s1,50;wind2_0,s2,30')
     parser.add_argument('--test_indices', type=str, default=None,
-                        help='²âÊÔ¼¯Ë÷Òı£¬ÓÃ¶ººÅ·Ö¸ô£¬ÀıÈç£º1,2,3,4,5')
+                        help='æµ‹è¯•é›†æ ·æœ¬ç´¢å¼•ï¼Œç”¨é€—å·åˆ†éš”ï¼Œå¦‚ï¼š1,2,3,4,5')
 
-    # Ìí¼Ó config ²ÎÊı
+    # è®­ç»ƒ config å‚æ•°
     parser.add_argument('--config', type=str, default=None,
-                        help='ÑµÁ·²ÎÊıjsonÂ·¾¶£¨Èçtraining_args.json£©')
+                        help='è®­ç»ƒå‚æ•°jsonè·¯å¾„ï¼Œå¦‚training_args.json')
 
     parser.add_argument('--upsampler', type=str, default='nearest+conv',
                         choices=['nearest+conv', 'pixelshuffle'],
-                        help='ÉÏ²ÉÑù·½Ê½: nearest+conv£¨Ä¬ÈÏ£©»ò pixelshuffle')
+                        help='ä¸Šé‡‡æ ·æ–¹å¼: nearest+convï¼ˆé»˜è®¤ï¼‰æˆ– pixelshuffle')
 
-    # ĞÂÔö£º½ö original(SwinIRMulti) ÓĞĞ§µÄ RSTB ×éÊı²ÎÊı
+    # æ–°å¢ï¼šä»…å¯¹ original(SwinIRMulti) æœ‰æ•ˆçš„ RSTB ç»„æ•°å‚æ•°
     parser.add_argument('--multi_rstb', type=int, default=None,
-                        help='½ö¶Ô original(SwinIRMulti) ÉúĞ§£ºÉèÖÃ RSTB ×éÊı£¨Èç 2/4/6/8/...£©')
+                        help='ä»…å¯¹ original(SwinIRMulti) ç”Ÿæ•ˆï¼šè®¾ç½® RSTB ç»„æ•°ï¼ˆå¦‚ 2/4/6/8/...ï¼‰')
 
     args = parser.parse_args()
     return args
 
 
 def create_model(args):
-    """¸ù¾İ²ÎÊı´´½¨Ä£ĞÍ"""
-    # ÓÅÏÈ¶ÁÈ¡ config£¨training_args.json£©
+    """æ ¹æ®å‚æ•°åˆ›å»ºæ¨¡å‹"""
+    # é¦–å…ˆè¯»å– configï¼ˆtraining_args.jsonï¼‰
     if args.config is not None and os.path.exists(args.config):
         with open(args.config, 'r') as f:
             config = json.load(f)
-        # Ö»±£ÁôÄ£ĞÍÏà¹Ø²ÎÊı
+        # åªä½¿ç”¨æ¨¡å‹ç›¸å…³å‚æ•°
         ignore_keys = [
             'model_type', 'model_path', 'data_path', 'save_dir', 'device', 'num_samples',
             'test_mode', 'sample_specs', 'test_indices', 'seed', 'batch_size', 'num_epochs',
@@ -572,10 +573,10 @@ def create_model(args):
         ]
         model_params = {k: v for k,
                         v in config.items() if k not in ignore_keys}
-        print("¡¾ÆÀ¹ÀÓÃÄ£ĞÍ²ÎÊıÈçÏÂ£¬ÇëĞ£¶Ô¡¿")
+        print("ä½¿ç”¨configä¸­çš„æ¨¡å‹å‚æ•°å¦‚ä¸‹ï¼ˆè¯·æ ¡éªŒï¼‰ï¼š")
         for k, v in model_params.items():
             print(f"  {k}: {v}")
-        # Ñ¡ÔñÄ£ĞÍÀàĞÍ
+        # é€‰æ‹©æ¨¡å‹ç±»å‹
         if args.model_type == 'original':
             model = SwinIRMulti(**model_params)
         elif args.model_type == 'enhanced':
@@ -583,21 +584,21 @@ def create_model(args):
         elif args.model_type == 'hybrid':
             model = SwinIRHybrid(**model_params)
         elif args.model_type == 'swinir_gdm':
-            model = SwinIRMultiGDM(**model_params)  # ¿É¸ù¾İĞèÒªµ¥¶ÀÉè¶¨²ÎÊı
+            model = SwinIRMultiGDM(**model_params)  # å¯æ ¹æ®éœ€è¦è°ƒæ•´å‚æ•°
         else:
             model = SwinIRFuse(**model_params)
         return model
 
-    # »ù´¡Ä£ĞÍ²ÎÊı
+    # åŸºç¡€æ¨¡å‹å‚æ•°
     base_params = {
-        'img_size': 16,  # LRÍ¼Ïñ´óĞ¡
-        'in_chans': 1,   # ÊäÈëÍ¨µÀÊı
-        'upscale': 6,    # ÉÏ²ÉÑù±¶Êı
-        'img_range': 1.,  # Í¼Ïñ·¶Î§
-        'upsampler': args.upsampler  # ¸ù¾İÃüÁîĞĞ²ÎÊıÉèÖÃ
+        'img_size': 16,  # LRå›¾åƒå¤§å°
+        'in_chans': 1,   # è¾“å…¥é€šé“æ•°
+        'upscale': 6,    # ä¸Šé‡‡æ ·å€ç‡
+        'img_range': 1.,  # å›¾åƒèŒƒå›´
+        'upsampler': args.upsampler  # å¯é€‰æ‹©çš„ä¸Šé‡‡æ ·å™¨
     }
 
-    # Ô­Ê¼Ä£ĞÍ²ÎÊı£¨¿É°´ multi_rstb µ÷Õû RSTB ×éÊı£©
+    # åŸå§‹æ¨¡å‹å‚æ•°ï¼šå¯æŒ‰ multi_rstb è®¾ç½® RSTB ç»„æ•°
     default_depth_per_group = 6
     default_heads_per_group = 6
     default_groups = 4
@@ -607,21 +608,21 @@ def create_model(args):
     num_heads = [default_heads_per_group for _ in range(groups)]
     original_params = {
         **base_params,
-        'window_size': 8,  # Swin Transformer´°¿Ú´óĞ¡
-        'depths': depths,  # RSTB ×éÊıÓÉÁĞ±í³¤¶È¾ö¶¨
-        'embed_dim': 60,  # Ç¶ÈëÎ¬¶È
-        'num_heads': num_heads,  # ×¢ÒâÁ¦Í·ÊıÁĞ±íĞèÓë depths Í¬³¤¶È
-        'mlp_ratio': 2.,  # MLP±ÈÂÊ,
+        'window_size': 8,  # Swin Transformerçª—å£å¤§å°
+        'depths': depths,  # RSTB ç»„æ·±åº¦åˆ—è¡¨
+        'embed_dim': 60,  # åµŒå…¥ç»´åº¦
+        'num_heads': num_heads,  # æ³¨æ„åŠ›å¤´æ•°åˆ—è¡¨ï¼Œä¸ depths å¯¹é½
+        'mlp_ratio': 2.,  # MLP æ¯”ä¾‹
     }
 
-    # ÔöÇ¿°æÄ£ĞÍ²ÎÊı
+    # å¢å¼ºæ¨¡å‹å‚æ•°
     enhanced_params = {
         **base_params,
-        'window_size': 8,  # Swin Transformer´°¿Ú´óĞ¡
-        'depths': [6, 6, 6, 6],  # Swin TransformerÉî¶È
-        'embed_dim': 60,  # Ç¶ÈëÎ¬¶È
-        'num_heads': [6, 6, 6, 6],  # ×¢ÒâÁ¦Í·Êı
-        'mlp_ratio': 2.,  # MLP±ÈÂÊ
+        'window_size': 8,  # Swin Transformerçª—å£å¤§å°
+        'depths': [6, 6, 6, 6],  # Swin Transformerå±‚æ•°
+        'embed_dim': 60,  # åµŒå…¥ç»´åº¦
+        'num_heads': [6, 6, 6, 6],  # æ³¨æ„åŠ›å¤´æ•°
+        'mlp_ratio': 2.,  # MLP æ¯”ä¾‹
         'qkv_bias': True,
         'qk_scale': None,
         'drop_rate': 0.,
@@ -634,14 +635,14 @@ def create_model(args):
         'resi_connection': '1conv'
     }
 
-    # »ìºÏ¼Ü¹¹Ä£ĞÍ²ÎÊı
+    # æ··åˆæ¶æ„æ¨¡å‹å‚æ•°
     hybrid_params = {
         **base_params,
-        'window_size': 8,  # Swin Transformer´°¿Ú´óĞ¡
-        'depths': [6, 6, 6, 6],  # Swin TransformerÉî¶È
-        'embed_dim': 60,  # Ç¶ÈëÎ¬¶È
-        'num_heads': [6, 6, 6, 6],  # ×¢ÒâÁ¦Í·Êı
-        'mlp_ratio': 2.,  # MLP±ÈÂÊ
+        'window_size': 8,  # Swin Transformerçª—å£å¤§å°
+        'depths': [6, 6, 6, 6],  # Swin Transformerå±‚æ•°
+        'embed_dim': 60,  # åµŒå…¥ç»´åº¦
+        'num_heads': [6, 6, 6, 6],  # æ³¨æ„åŠ›å¤´æ•°
+        'mlp_ratio': 2.,  # MLP æ¯”ä¾‹
         'qkv_bias': True,
         'qk_scale': None,
         'drop_rate': 0.,
@@ -654,7 +655,7 @@ def create_model(args):
         'resi_connection': '1conv'
     }
 
-    # FuseÄ£ĞÍ²ÎÊı (ÒÆ³ıÁËresi_connection)
+    # Fuseæ¨¡å‹å‚æ•° (ç§»é™¤äº†resi_connection)
     fuse_params = {
         'img_size': 16,
         'in_chans': 1,
@@ -684,7 +685,7 @@ def create_model(args):
     elif args.model_type == 'hybrid':
         model = SwinIRHybrid(**hybrid_params)
     elif args.model_type == 'swinir_gdm':
-        model = SwinIRMultiGDM(**original_params)  # ¿É¸ù¾İĞèÒªµ¥¶ÀÉè¶¨²ÎÊı
+        model = SwinIRMultiGDM(**original_params)  # å¯æ ¹æ®éœ€è¦è°ƒæ•´å‚æ•°
     else:  # fuse
         model = SwinIRFuse(**fuse_params)
 
@@ -693,38 +694,38 @@ def create_model(args):
 
 def get_test_set_indices(test_indices_str, dataset):
     """
-    ¸ù¾İ²âÊÔ¼¯Ë÷Òı×Ö·û´®»ñÈ¡ÒªÆÀ¹ÀµÄÑù±¾Ë÷Òı
+    ï¿½ï¿½ï¿½İ²ï¿½ï¿½Ô¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½È¡Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-    ²ÎÊı:
-        test_indices_str: ¶ººÅ·Ö¸ôµÄË÷Òı×Ö·û´®£¬ÀıÈç£º"1,2,3,4,5"
-        dataset: Êı¾İ¼¯¶ÔÏó
+    ï¿½ï¿½ï¿½ï¿½:
+        test_indices_str: ï¿½ï¿½ï¿½Å·Ö¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ç£º"1,2,3,4,5"
+        dataset: ï¿½ï¿½ï¿½İ¼ï¿½ï¿½ï¿½ï¿½ï¿½
 
-    ·µ»Ø:
-        list: ÒªÆÀ¹ÀµÄÑù±¾Ë÷ÒıÁĞ±í
+    ï¿½ï¿½ï¿½ï¿½:
+        list: Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ±ï¿½
     """
     if not test_indices_str:
         return []
 
     try:
-        # ½âÎöË÷Òı×Ö·û´®
+        # è§£æç´¢å¼•å­—ç¬¦ä¸²
         indices = [int(idx.strip()) for idx in test_indices_str.split(',')]
-        # ÑéÖ¤Ë÷ÒıÊÇ·ñÓĞĞ§
+        # éªŒè¯ç´¢å¼•æ˜¯å¦æœ‰æ•ˆ
         valid_indices = [idx for idx in indices if 0 <= idx < len(dataset)]
         if len(valid_indices) != len(indices):
-            print(f"¾¯¸æ£º²¿·ÖË÷Òı³¬³ö·¶Î§£¬ÒÑÌø¹ıÎŞĞ§Ë÷Òı")
-            print(f"¿ÉÓÃË÷Òı·¶Î§£º0 µ½ {len(dataset)-1}")
+            print(f"è­¦å‘Šï¼šéƒ¨åˆ†ç´¢å¼•è¶…å‡ºèŒƒå›´ï¼Œå·²è¿‡æ»¤æ— æ•ˆç´¢å¼•")
+            print(f"æœ‰æ•ˆç´¢å¼•èŒƒå›´ï¼š0 åˆ° {len(dataset)-1}")
             print(
-                f"ÎŞĞ§µÄË÷Òı£º{[idx for idx in indices if idx < 0 or idx >= len(dataset)]}")
+                f"ï¿½ï¿½Ğ§ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½{[idx for idx in indices if idx < 0 or idx >= len(dataset)]}")
         return valid_indices
     except ValueError as e:
-        print(f"´íÎó£ºÎŞĞ§µÄË÷Òı¸ñÊ½ - {e}")
-        print(f"¿ÉÓÃË÷Òı·¶Î§£º0 µ½ {len(dataset)-1}")
+        print(f"è§£ææ— æ•ˆç´¢å¼•æ ¼å¼ - {e}")
+        print(f"ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î§ï¿½ï¿½0 ï¿½ï¿½ {len(dataset)-1}")
         return []
 
 
 def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch_size=16, num_workers=4, max_visualize=10):
     """
-    ÅúÁ¿ÍÆÀíº¯Êı£¬½öÓÃÓÚall_generalizationºÍall_test_set
+    ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½all_generalizationï¿½ï¿½all_test_set
     """
     import torch
     from torch.utils.data import DataLoader
@@ -743,8 +744,8 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
     total_mse = 0
     total_ssim = 0
     valid_samples = 0
-    visualized = 0  # ¿ÉÊÓ»¯¼ÆÊıÆ÷
-    total_processed = 0  # È«¾ÖÑù±¾¼ÆÊıÆ÷£¬ÓÃÓÚÃüÃû sample_{idx}
+    visualized = 0  # å¯è§†åŒ–è®¡æ•°å™¨
+    total_processed = 0  # å…¨å±€å¤„ç†çš„æ ·æœ¬è®¡æ•°å™¨ï¼Œç”¨äº sample_{idx}
 
     with torch.no_grad():
         for i, batch in enumerate(tqdm(dataloader, desc="Batch Evaluating")):
@@ -760,7 +761,7 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
             else:
                 gdm_out, gsl_out = model(lr)
 
-            # ¼ÆËãÖ¸±ê£¨ÅúÁ¿£©
+            # è®¡ç®—æŒ‡æ ‡ï¼ˆæ‰¹å¤„ç†ï¼‰
             mse = F.mse_loss(gdm_out, hr, reduction='none')
             mse = mse.view(mse.size(0), -1).mean(dim=1)
             psnr = 10 * torch.log10(1.0 / mse)
@@ -780,7 +781,7 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
             total_ssim += ssim.sum().item()
             valid_samples += lr.size(0)
 
-            # GSLÏà¹Ø
+            # GSLè¯¯å·®
             if model_type != 'swinir_gdm' and source_pos is not None and gsl_out is not None:
                 true_pos = source_pos * 95.0
                 pred_pos = gsl_out * 95.0
@@ -788,7 +789,7 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
                     torch.sum((pred_pos - true_pos) ** 2, dim=1)) / 10.0
                 total_position_error += position_error.sum().item()
 
-            # Îª¸ÃÅú´ÎÖĞµÄÃ¿¸öÑù±¾´´½¨¶ÀÁ¢Ä¿Â¼²¢±£´æÊı¾İÓëÍ¼Æ¬£¨²»ÊÜmax_visualizeÏŞÖÆ£©
+            # ä¸ºæ‰¹æ¬¡ä¸­çš„æ‰€æœ‰æ ·æœ¬åˆ›å»ºç‹¬ç«‹ç›®å½•ï¼Œä¿å­˜æ•°æ®å’Œå›¾ç‰‡ï¼ˆå—max_visualizeé™åˆ¶ï¼‰
             batch_size_now = lr.size(0)
             for j in range(batch_size_now):
                 sample_idx_global = total_processed
@@ -796,7 +797,7 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
                     save_dir, f'sample_{sample_idx_global}')
                 os.makedirs(sample_dir, exist_ok=True)
 
-                # ±£´æÑù±¾Êı¾İ£¨CSV/NPYÒÀ¾İÄ£ĞÍÀàĞÍµÄ¼ÈÓĞÂß¼­£©
+                # è¿›è¡Œæ¨ç†ï¿½ï¿½ï¿½İ£ï¿½CSV/NPYï¿½ï¿½ï¿½ï¿½Ä£ï¿½ï¿½ï¿½ï¿½ï¿½ÍµÄ¼ï¿½ï¿½ï¿½ï¿½ß¼ï¿½ï¿½ï¿½
                 save_sample_data(
                     lr[j:j+1], hr[j:j+1], gdm_out[j:j+1],
                     (gsl_out[j:j+1] if (gsl_out is not None and model_type !=
@@ -807,7 +808,7 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
                     sample_dir, sample_idx_global, model_type
                 )
 
-                # ±£´æ×éºÏÍ¼
+                # ä¿å­˜åˆæˆå›¾
                 composite_path = os.path.join(
                     sample_dir, f'sample_{sample_idx_global}_composite.png')
                 if model_type == 'swinir_gdm':
@@ -822,7 +823,7 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
                         None, composite_path
                     )
 
-                # µ¥¶À±£´æ LR / HR / GDM Í¼
+                # å•ç‹¬ä¿å­˜ LR / HR / GDM å›¾
                 lr_np = lr[j].squeeze().detach().cpu().numpy()
                 hr_np = hr[j].squeeze().detach().cpu().numpy()
                 gdm_np = gdm_out[j].squeeze().detach().cpu().numpy()
@@ -845,7 +846,7 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
 
                 plt.figure(figsize=(5, 5))
                 plt.imshow(gdm_np, cmap='viridis')
-                # original Ä£ĞÍÔÚ¶ÀÁ¢GDMÍ¼ÉÏ±ê×¢Ğ¹Â©Ô´ÕæÖµ/Ô¤²â
+                # original æ¨¡å‹åœ¨å•ç‹¬GDMå›¾ä¸Šæ ‡æ³¨æ³„æ¼æºçœŸå®/é¢„æµ‹
                 if model_type != 'swinir_gdm' and gsl_out is not None and source_pos is not None:
                     gsl_out_np = gsl_out[j].squeeze().detach().cpu().numpy()
                     source_pos_np = source_pos[j].squeeze(
@@ -865,7 +866,7 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
 
                 total_processed += 1
 
-            # ÁíÍâ£¬½ö±£ÁôÉÙÁ¿Åú´Î¼¶¿ìËÙä¯ÀÀÍ¼£¨²»Ó°ÏìÍêÕû±£´æ£©
+            # å¦å¤–ï¼Œä¸ºæ‰¹æ¬¡é¢„è§ˆç”Ÿæˆåˆæˆå›¾ï¼ˆä¸å½±å“ä¸»è¦åŠŸèƒ½ï¼‰
             if visualized < max_visualize:
                 preview_path = os.path.join(
                     save_dir, f'batch_{i}_sample_preview.png')
@@ -873,13 +874,13 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
                     gsl_out[0:1] if gsl_out is not None else None), None, None, preview_path)
                 visualized += 1
 
-    # Êä³öÆ½¾ùÖ¸±ê
+    # ï¿½ï¿½ï¿½Æ½ï¿½ï¿½Ö¸ï¿½ï¿½
     if valid_samples > 0:
         avg_psnr = total_psnr / valid_samples
         avg_mse = total_mse / valid_samples
         avg_ssim = total_ssim / valid_samples
-        print(f"\nÅúÁ¿ÆÀ¹À½á¹û:")
-        print(f"ÓĞĞ§Ñù±¾Êı: {valid_samples}")
+        print(f"\nï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½:")
+        print(f"æœ‰æ•ˆæ ·æœ¬æ•°: {valid_samples}")
         print(f"Average PSNR: {avg_psnr:.2f} dB")
         print(f"Average MSE: {avg_mse:.6f}")
         print(f"Average SSIM: {avg_ssim:.4f}")
@@ -887,28 +888,28 @@ def batch_infer_model(model, dataset, save_dir, model_type, device='cuda', batch
             avg_position_error = total_position_error / valid_samples
             print(f"Average Position Error: {avg_position_error:.4f} m")
     else:
-        print("Ã»ÓĞÓĞĞ§µÄÑù±¾¿É¹©ÆÀ¹À")
+        print("æ²¡æœ‰æœ‰æ•ˆæ ·æœ¬æˆåŠŸå¤„ç†")
 
 
 def main():
     args = parse_args()
 
-    # ÉèÖÃÉè±¸
+    # è·å–è®¾å¤‡
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    # ´´½¨Ä£ĞÍ
+    # åˆ›å»ºæ¨¡å‹
     model = create_model(args)
 
-    # ¼ÓÔØÄ£ĞÍ
+    # åˆ›å»ºæ¨¡å‹
     print(f"Loading model from {args.model_path}")
     try:
-        # Õë¶Ô original/enhanced/hybrid ×ö¸ü½¡×³µÄÈ¨ÖØ¼ÓÔØ
+        # é’ˆå¯¹ original/enhanced/hybrid åšæ›´å¥å£®çš„æƒé‡åŠ è½½
         if args.model_type in ['original', 'enhanced', 'hybrid']:
             torch.serialization.add_safe_globals([Namespace])
             checkpoint = torch.load(
                 args.model_path, map_location='cpu', weights_only=False)
-            # ÅĞ¶ÏÊÇÍêÕûcheckpoint»¹ÊÇstate_dict
+            # åˆ¤æ–­æ˜¯å®Œæ•´checkpointè¿˜æ˜¯state_dict
             if isinstance(checkpoint, dict):
                 if 'model' in checkpoint:
                     state_dict = checkpoint['model']
@@ -922,44 +923,44 @@ def main():
                 state_dict = checkpoint
             model.load_state_dict(state_dict)
         else:
-            # fuseÄ£ĞÍÖ±½Ó¼ÓÔØ
+            # fuseæ¨¡å‹ç›´æ¥åŠ è½½
             torch.serialization.add_safe_globals([Namespace])
             checkpoint = torch.load(
                 args.model_path, map_location='cpu', weights_only=False)
-            # ¼ì²éÊÇ·ñÊÇÍêÕûcheckpoint
+            # æ£€æŸ¥æ˜¯å¦æ˜¯å®Œæ•´checkpoint
             if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
                 state_dict = checkpoint['model_state_dict']
             else:
                 state_dict = checkpoint
             model.load_state_dict(state_dict)
     except Exception as e:
-        print(f"¼ÓÔØÄ£ĞÍÈ¨ÖØÊ§°Ü: {e}")
+        print(f"åŠ è½½æ¨¡å‹æƒé‡å¤±è´¥: {e}")
         return
 
     model = model.to(device)
     model.eval()
 
-    use_batch = False  # <--- Ôö¼ÓÕâÒ»ĞĞ£¬Ä¬ÈÏ²»¿ªÆôÅú´¦Àí
+    use_batch = False  # <--- å¢åŠ è¿™ä¸€è¡Œï¼Œé»˜è®¤ä¸å¼€å¯æ‰¹å¤„ç†
 
-    # ¼ÓÔØÊı¾İ¼¯
+    # åŠ è½½æ•°æ®é›†
     dataset = None
-    # ¸ù¾İ²âÊÔÄ£Ê½Ñ¡ÔñÒªÆÀ¹ÀµÄÑù±¾
+    # æ ¹æ®æµ‹è¯•æ¨¡å¼é€‰æ‹©è¦è¯„ä¼°çš„æ ·æœ¬
     indices_to_evaluate = []
     if args.test_mode == 'generalization':
-        # ·º»¯²âÊÔÄ£Ê½
+        # æ³›åŒ–æµ‹è¯•æ¨¡å¼
         if args.sample_specs is not None:
             sample_specs = [spec.strip()
                             for spec in args.sample_specs.split(';')]
             dataset = MultiTaskDataset(args.data_path)
             indices_to_evaluate = get_dataset_indices(sample_specs, dataset)
-            print(f"Ê¹ÓÃ·º»¯²âÊÔÄ£Ê½£¬Ñù±¾¹æ¸ñ£º{args.sample_specs}")
+            print(f"ä½¿ç”¨æ³›åŒ–æµ‹è¯•æ¨¡å¼ï¼Œæ ·æœ¬è§„æ ¼ï¼š{args.sample_specs}")
         else:
-            print("´íÎó£º·º»¯²âÊÔÄ£Ê½ĞèÒªÌá¹© sample_specs ²ÎÊı")
+            print("ï¿½ï¿½ï¿½ó£º·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä£Ê½ï¿½ï¿½Òªï¿½á¹© sample_specs ï¿½ï¿½ï¿½ï¿½")
             return
     elif args.test_mode == 'all_generalization':
         dataset = MultiTaskDataset(args.data_path)
         indices_to_evaluate = list(range(len(dataset)))
-        print("Ê¹ÓÃ·º»¯²âÊÔÈ«Á¿Ä£Ê½£¬ÆÀ¹ÀËùÓĞÑù±¾")
+        print("ä½¿ç”¨æ³›åŒ–æµ‹è¯•å…¨é‡æ¨¡å¼ï¼Œè¯„ä¼°æ‰€æœ‰æ ·æœ¬")
         use_batch = True
     elif args.test_mode == 'all_test_set':
         from datasets.h5_dataset import generate_train_valid_test_dataset
@@ -967,10 +968,10 @@ def main():
             args.data_path, seed=42)
         dataset = test_dataset
         indices_to_evaluate = list(range(len(dataset)))
-        print("Ê¹ÓÃ²âÊÔ¼¯È«Á¿Ä£Ê½£¬ÆÀ¹ÀËùÓĞÑù±¾")
+        print("ä½¿ç”¨æµ‹è¯•é›†å…¨é‡æ¨¡å¼ï¼Œè¯„ä¼°æ‰€æœ‰æ ·æœ¬")
         use_batch = True
     else:
-        # ²âÊÔ¼¯Ä£Ê½
+        # æµ‹è¯•é›†æ¨¡å¼
         from datasets.h5_dataset import generate_train_valid_test_dataset
         train_dataset, valid_dataset, test_dataset = generate_train_valid_test_dataset(
             args.data_path, seed=42)
@@ -978,18 +979,18 @@ def main():
         if args.test_indices is not None:
             indices_to_evaluate = get_test_set_indices(
                 args.test_indices, dataset)
-            print(f"Ê¹ÓÃ²âÊÔ¼¯Ä£Ê½£¬²âÊÔË÷Òı£º{args.test_indices}")
+            print(f"ä½¿ç”¨æµ‹è¯•é›†æ¨¡å¼ï¼Œæµ‹è¯•ç´¢å¼•ï¼š{args.test_indices}")
         else:
-            print("´íÎó£º²âÊÔ¼¯Ä£Ê½ĞèÒªÌá¹© test_indices ²ÎÊı")
+            print("ï¿½ï¿½ï¿½ó£º²ï¿½ï¿½Ô¼ï¿½Ä£Ê½ï¿½ï¿½Òªï¿½á¹© test_indices ï¿½ï¿½ï¿½ï¿½")
             return
 
     if not indices_to_evaluate:
-        print("Ã»ÓĞÕÒµ½ÒªÆÀ¹ÀµÄÑù±¾£¡")
+        print("æ²¡æœ‰æ‰¾åˆ°è¦è¯„ä¼°çš„æ ·æœ¬ï¼")
         return
-    print(f"ÕÒµ½ {len(indices_to_evaluate)} ¸öÒªÆÀ¹ÀµÄÑù±¾")
-    # ½øĞĞÍÆÀí
+    print(f"æ‰¾åˆ° {len(indices_to_evaluate)} ä¸ªè¦è¯„ä¼°çš„æ ·æœ¬")
+    # è¿›è¡Œæ¨ç†
     if use_batch:
-        # ¼ÆËãÄ£ĞÍ×¨Êô±£´æ¸ùÄ¿Â¼
+        # åˆ›å»ºæ¨¡å‹ä¸“å±çš„ç»“æœç›®å½•
         base_save_dir = os.path.abspath(args.save_dir)
         if args.model_type == 'swinir_gdm':
             model_root = os.path.join(base_save_dir, 'swinir_gdm_results')
